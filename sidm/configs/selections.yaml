@@ -916,3 +916,16 @@ baseNoLj_A_mumu_matched_lj_noPfMatch_highLjPt: &baseNoLj_A_mumu_matched_lj_noPfM
   evt_cuts:
     - *evt_pv_cuts
     - "genAs_toMu_matched_muLj"
+
+jake_test_select:
+  <<: *base
+  obj_cuts: 
+    electrons:
+      - "dR(e, A) < 0.5"
+      - "looseID"
+    muons:
+      - "dR(mu, A) < 0.5"
+      - "looseID"
+    dsaMuons:
+      - "dR(mu, A) < 0.5"
+      - "displaced ID"

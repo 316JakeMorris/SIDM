@@ -18,6 +18,19 @@ from sidm.definitions.objects import derived_objs
 # always reload local modules to pick up changes during development
 importlib.reload(h)
 
+def testing(objs, mask):
+    print("I RAN. I RAN SO FAR AWAY!")
+    print(type(objs))
+    print(objs)
+    print(mask)
+    # print("electrons[mask, :2].sum().mass")
+    #print(objs["electrons"][mask, :2].sum().mass)
+
+    print("-----------------------------------")
+    #print(ak.num(matched(objs["electrons"], objs["genAs"], 0.5)))
+    return objs["electrons"][mask, :2].sum().mass
+
+testing_func = lambda objs, mask: testing(objs, mask)
 
 # define counters
 counter_defs = {
@@ -2521,4 +2534,78 @@ hist_defs = {
         evt_mask=lambda objs: ((ak.num(matched(objs["genMus"], objs["muons"], 0.4)) > 0)
                                & (ak.num(matched(objs["genAs"], objs["muons"], 0.4)) > 0)),
     ),
+    #-----------------------------------------------------------------------------------------------------------------------------
+    "jake_test": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 8, name="test_mass",
+                                     label=r"InvMass($e_{0}$, $e_{1}$)"),
+                   lambda objs, mask: objs["electrons"][mask, :2].sum().mass),
+        ],
+        #Mask to all events that have electrons matched to a dark photon decay
+        evt_mask=lambda objs: ak.num(matched(objs["electrons"], objs["genAs"], 0.5)) > 1,
+    ),
+    "jake_test_no_mask": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 8, name="test_mass_no_mask",
+                                     label=r"InvMass($e_{0}$, $e_{1}$)"),
+                   lambda objs, mask: objs["electrons"][mask, :2].sum().mass),
+        ],
+    ),
+    "jake_test_func": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 8, name="test_mass2",
+                                     label=r"InvMass($e_{0}$, $e_{1}$)"),
+                   testing_func),
+        ],
+        #Mask to all events that have electrons matched to a dark photon decay
+        evt_mask=lambda objs: (ak.num(matched(objs["electrons"], objs["genAs"], 0.5)) > 1),
+    ),
+    #-----------------------------------------------------------------------------------------------------------------------------
+    "lj_lj_mass_diff": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(200, -50, 50, name=r"$m_{LJ_{0}}$ - $m_{LJ_{1}}$"),
+                   lambda objs, mask: objs["ljs"][mask, 1].mass - objs["ljs"][mask, 0].mass),
+        ],
+        evt_mask=lambda objs: ak.num(objs["ljs"]) > 1,
+    ),
+    
+    
+    #--LJ Constituents Eta Study---------------------------------------------------------------------------------------------
+    "lj_muon_eta": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(50, -3, 3, name="lj_mu_eta"),
+                   lambda objs, mask: objs["ljs"].pfMuons.eta), 
+                    # muon1.eta -> eta1
+                    # [muon1, muon2].eta -> [eta1, eta2] ? 
+                    #Should I use .muons or .pfMuons?
+                    #objs["ljs"][mask, :2].muons.eta??? 
+                    #Should I limit to just the mask and then the first two objects in the LJ?
+                    #What does .muons return? Presumably a list of all of the muons?
+                    #Does .eta work on whatever .muons returns?
+                    #If it does, and it returns a list of eta values for each muon in the list, does whatever .eta returns work to correctly generate the histogram?
+        ],
+        evt_mask=lambda objs: ak.num(objs["ljs"]) > 1,
+    ),        
+    "lj_dsaMuon_eta": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(50, -3, 3, name="lj_dsaMu_eta"),
+                   lambda objs, mask: objs["ljs"].dsaMuons.eta),
+        ],
+        evt_mask=lambda objs: ak.num(objs["ljs"]) > 1,
+    ),
+    "lj_electron_eta": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(50, -3, 3, name="lj_ele_eta"),
+                   lambda objs, mask: objs["ljs"].electrons.eta),
+        ],
+        evt_mask=lambda objs: ak.num(objs["ljs"]) > 1,
+    ),
+    "lj_photon_eta": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(50, -3, 3, name="lj_photon_eta"),
+                   lambda objs, mask: objs["ljs"].photons.eta),
+        ],
+        evt_mask=lambda objs: ak.num(objs["ljs"]) > 1,
+    ),
+
 }

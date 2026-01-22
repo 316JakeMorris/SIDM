@@ -87,6 +87,10 @@ lj_base: &lj_base
   - "lj_muonN"
   - "lj_dsaMuN"
   - "lj_pfMuN"
+  - "lj_muon_eta"
+  - "lj_dsaMuon_eta"
+  - "lj_electron_eta"
+  - "lj_photon_eta"
 
 mu_lj_base: &mu_lj_base
   - "mu_lj_n"
@@ -542,4 +546,10 @@ lj_reco_effi_base: &lj_reco_effi_base
   - "genMu_genMu_dR_lowRange"
   - "genMu_genMu_dR_XLowRange"
   - "genMu_genMu_dR_XXLowRange"
+
+jake_test_collection: &jake_test_collection
+  - "jake_test"
+  #- "jake_test_no_mask" #WORKS by itself!!!
+  - "lj_lj_mass_diff"
+  #- "jake_test_func"
 
