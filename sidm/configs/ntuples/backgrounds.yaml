@@ -12441,7 +12441,7 @@ skimmed_llpNanoAOD_v2:
       - skimmed_output_2904.root
       - skimmed_output_2905.root
       - skimmed_output_2906.root
-      - skimmed_output_2907.root
+      #- skimmed_output_2907.root
       path: QCD_Pt-120To170/
       skim_factor: 0.03363592243718427
     QCD_Pt15To20:
