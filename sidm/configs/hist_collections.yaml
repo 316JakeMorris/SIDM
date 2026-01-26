@@ -92,6 +92,12 @@ lj_base: &lj_base
   - "lj_electron_eta"
   - "lj_photon_eta"
 
+lj_eta_study: &lj_eta_study
+  - "lj_muon_eta"
+  - "lj_dsaMuon_eta"
+  - "lj_electron_eta"
+  - "lj_photon_eta"
+
 mu_lj_base: &mu_lj_base
   - "mu_lj_n"
   - "mu_lj_pt"
