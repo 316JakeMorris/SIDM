@@ -2584,28 +2584,24 @@ hist_defs = {
                     #Does .eta work on whatever .muons returns?
                     #If it does, and it returns a list of eta values for each muon in the list, does whatever .eta returns work to correctly generate the histogram?
         ],
-        evt_mask=lambda objs: ak.num(objs["ljs"]) > 1,
     ),        
     "lj_dsaMuon_eta": h.Histogram(
         [
             h.Axis(hist.axis.Regular(50, -3, 3, name="lj_dsaMu_eta"),
                    lambda objs, mask: objs["ljs"].dsaMuons.eta),
         ],
-        evt_mask=lambda objs: ak.num(objs["ljs"]) > 1,
     ),
     "lj_electron_eta": h.Histogram(
         [
             h.Axis(hist.axis.Regular(50, -3, 3, name="lj_ele_eta"),
                    lambda objs, mask: objs["ljs"].electrons.eta),
         ],
-        evt_mask=lambda objs: ak.num(objs["ljs"]) > 1,
     ),
     "lj_photon_eta": h.Histogram(
         [
             h.Axis(hist.axis.Regular(50, -3, 3, name="lj_photon_eta"),
                    lambda objs, mask: objs["ljs"].photons.eta),
         ],
-        evt_mask=lambda objs: ak.num(objs["ljs"]) > 1,
     ),
 
 }
