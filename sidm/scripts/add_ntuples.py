@@ -40,6 +40,7 @@ def parse_name(name):
     """
 
     name = name.removeprefix("CutDecayFalse_")
+    name = name.removeprefix("LLPnanoAODv1_")
 
     process_names = {
         "SIDM_XXTo2ATo2Mu2E_mXX": "2Mu2E_",
@@ -54,6 +55,12 @@ def parse_name(name):
         "WW_TuneCP5_13TeV" : "WW",
         "WZ_TuneCP5_13TeV" : "WZ",
         "ZZ_TuneCP5_13TeV" : "ZZ",
+        "Run2018C" : "DoubleMuon_2018C",
+        "Run2018C_15Feb2022_UL2018": "DoubleMuon_2018C",
+        "0000": "DoubleMuon_2018A_0",
+        "0001": "DoubleMuon_2018A_1",
+        "0002": "DoubleMuon_2018A_2",
+
         # fixme: add backgrounds and data as necessary
     }
     chunks = name.split("-")
@@ -136,7 +143,7 @@ for sample in samples:
 
     # Descend one layer, expecting to find a single directory
     try:
-        for _ in range(1):
+        for _ in range(2):
             sample_path = descend(ntuple_path, sample_path, args.first_dir)
             if sample_path is None:
                 raise StopIteration()
@@ -163,7 +170,7 @@ for sample in samples:
         skimmed_evts = 0
         original_evts = 0
         # check first 10 files for valid OriginalEventIndex and sufficient stats
-        for file in files[:20]:
+        for file in files[:10000]:
             file_path = f"{redirector}//{ntuple_path}{sample_path}/{file}"
             try:
                 in_file = ROOT.TFile.Open(file_path)
@@ -182,7 +189,7 @@ for sample in samples:
             # Go to next file if OriginalEventIndex is invalid
             if file_original_evts == 0:
                 print("invalid OriginalEventIndex, going to next file")
-                continue
+                #continue
             else:
                 skimmed_evts += file_skimmed_evts
                 original_evts += file_original_evts
@@ -195,6 +202,10 @@ for sample in samples:
             print("No valid OriginalEventIndex found, setting skim_factor to 1.0")
     print(f"Setting skim factor to {skim_factor}")
     output[args.name]["samples"][simple_name]["skim_factor"] = skim_factor
+
+    if "DoubleMuon_2018" in simple_name:
+        output[args.name]["samples"][simple_name]["is_data"] = True
+        output[args.name]["samples"][simple_name]["year"] = "2018"
 
 
 # Avoid yaml references, a la stackoverflow.com/questions/13518819
