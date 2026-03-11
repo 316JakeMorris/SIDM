@@ -6,6 +6,7 @@ import awkward as ak
 import numpy as np
 import matplotlib.pyplot as plt
 import mplhep as hep
+import scipy.optimize as opt
 import hist.intervals
 from sidm import BASE_DIR
 
@@ -67,9 +68,13 @@ def dR(obj1, obj2):
     dr = obj1.nearest(obj2, return_metric=True)[1]
     return ak.fill_none(dr, np.inf)
 
+def dR_general(obj1, obj2):
+    """Return ΔR between obj1 and obj2, filling None with inf"""
+    return ak.fill_none(obj1.delta_r(obj2), np.inf)
+
 def dR_outer(obj1, obj2):
     """Return dR between outer tracks of obj1 and obj2"""
-    return np.sqrt((obj1.outerEta - obj2.outerEta)**2 + (obj1.outerPhi - obj2.outerPhi)**2)
+    return ak.fill_none(np.sqrt((obj1.outerEta - obj2.outerEta)**2 + (obj1.outerPhi - obj2.outerPhi)**2), np.inf)
 
 def drop_none(obj):
     """Remove None entries from an array (not available in Awkward 1)"""
@@ -78,6 +83,17 @@ def drop_none(obj):
 def matched(obj1, obj2, r):
     """Return set of obj1 that have >=1 obj2 within r; remove None entries before returning"""
     return drop_none(obj1[dR(obj1, obj2) < r])
+
+def add_matched_dsamuon_mass(obj):
+    obj["mass"] = ak.full_like(obj.pt, 0.105712890625)
+    return obj
+
+def lj_combination_dR(obj):
+    pair = ak.combinations(obj, 2, axis=1, fields=["lj1", "lj2"])
+    dR = dR_general(pair["lj1"], pair["lj2"])
+    min_dR = ak.min(dR_general(pair["lj1"], pair["lj2"]), axis=1)
+    max_dR = ak.max(dR_general(pair["lj1"], pair["lj2"]), axis=1)
+    return dR, min_dR, max_dR
 
 def rho(obj, ref=None, use_v=False):
     """Return transverse distance between object and reference (default reference is 0,0)"""
@@ -172,7 +188,10 @@ def make_fileset(samples, ntuple_version, max_files=-1, location_cfg="signal_v8.
         fileset[sample] = {
             "files": file_list,
             "metadata": {
-                "skim_factor": sample_yaml.get("skim_factor", 1.0)}
+                "skim_factor": sample_yaml.get("skim_factor", 1.0),
+                "is_data": sample_yaml.get("is_data", False),
+                "year": sample_yaml.get("year", "2018"),
+            },
         }
     return fileset
 
@@ -191,18 +210,35 @@ def get_hist_mean(h):
     return np.atleast_1d(h.profile(axis=0).view())[0].value
 
 def plot_ratio(num, den, **kwargs):
-    plt.subplots(2, 1, figsize=(10, 10), sharex=True,
-                      gridspec_kw={'height_ratios': [2, 1],'hspace':0})
-    plt.subplot(2, 1, 1)
-    plot(num, flow='none')
-    plot(den, flow='none')
+    fig, (ax1, ax2) = plt.subplots(
+        2, 1, figsize=(12, 12), sharex=True,
+        gridspec_kw={'height_ratios': [3, 1], 'hspace': 0}
+    )
+    plt.sca(ax1)
+    plot(den, flow='none', color="k", skip_label=True,
+         label=kwargs["legend"][0])
+
+    if not isinstance(num, list):
+        num = [num]
+
+    for i, x in enumerate(num):
+        plot(x, flow='none', label=kwargs["legend"][i + 1])
+
     if "legend" in kwargs:
-        plt.legend(kwargs["legend"])
-    plt.subplot(2, 1, 2)
-    eff, errors = get_eff_hist(num, den)
-    plot(eff,histtype='errorbar',yerr=errors,skip_label=True,color="black")
-    plt.ylabel("Efficiency")
-    plt.ylim(0, 1.2)
+        ax1.legend( title = kwargs["text"], alignment="left", )
+
+    if "ylim" in kwargs:
+        plt.ylim(kwargs["ylim"])
+    if "ylabel" in kwargs:
+        plt.ylabel(kwargs["ylabel"])
+    plt.tight_layout()
+    plt.sca(ax2)
+    for x in num:
+        eff, errors = get_eff_hist(x, den)
+        plot(eff, histtype='errorbar', yerr=errors, skip_label=True)
+
+    ax2.set_ylabel("Efficiency")
+    ax2.set_ylim(0, 1.2)
 
 def round_sigfig(val, digits=1):
     """Return a number rounded to a given number of significant figures. Uses magic copied from
@@ -258,12 +294,12 @@ def get_lumi(year, cfg="run_periods.yaml"):
     lumi_menu = load_yaml(f"{BASE_DIR}/configs/" + cfg)
     return lumi_menu[year]["lumi"]
 
-def get_lumixs_weight(dataset, year, n_evts):
+def get_lumixs_weight(dataset, year, sum_weights):
     """Get weights to scale n_evts to lumi*xs"""
-    # n_evts: actual number of events processed
+    # n_evts: sum of weights from processed events
     lumi = get_lumi(year)
     xs = get_xs(dataset)
-    return lumi*xs/n_evts
+    return lumi*xs/sum_weights
 
 def check_variablePhoton(value, min_val=0b01):
     """
@@ -276,7 +312,7 @@ def select_numbersPhoton(number, var1, var2):
     Function to select the numbers where each variable is at least 0b010 except for variable of choice
     """
     selected = True
-    
+
     # number will have 14 bits (2 bits per each cut)
     # starting with MinPtCut at the LSB
     # and ending with PhoIsoWithEALinScalingCut at the MSB
@@ -289,8 +325,8 @@ def select_numbersPhoton(number, var1, var2):
         ('NeuHadIsoWithEAQuadScalingCut', 10),
         ('PhoIsoWithEALinScalingCut', 12),
     ]
-    
-    # Check each variable except variable of choice 
+
+    # Check each variable except variable of choice
     for var, start_bit in variables:
         # Get the 2 bits corresponding to this variable
         value = (number >> start_bit) & 0b11  # Extract 2 bits
@@ -298,9 +334,8 @@ def select_numbersPhoton(number, var1, var2):
             if not check_variablePhoton(value):
                 selected = False
                 break
-    
-    return selected
 
+    return selected
 
 def returnBitMapTArrayPhoton(bitMap, var1, var2):
     tList = []
@@ -316,3 +351,186 @@ def returnBitMapTArrayPhoton(bitMap, var1, var2):
                 temp.append(False)
         tList.append(temp)
     return ak.Array(tList)
+
+def lepton_dxy_resolution(leptons, pvs, rank="all", diff=False):
+    matched = leptons.matched_gen
+
+    if rank == "all":
+        valid = (~ak.is_none(matched)) & (matched.status == 1)
+        leptons = leptons[valid]
+        matched = matched[valid]
+
+        dxy_gen = dxy(matched, ref=pvs)
+        dxy_reco = leptons.dxy
+        nonzero = dxy_gen != 0
+
+        result = dxy_reco - dxy_gen
+        return result if diff else result[nonzero] / dxy_gen[nonzero]
+
+    # rank is an integer: one lepton per event
+    enough = ak.num(leptons) > rank
+    leptons = leptons[enough]
+    pvs = pvs[enough]
+    matched = leptons.matched_gen
+
+    lep = leptons[:, rank]
+    gen = matched[:, rank]
+    dxy_gen = dxy(gen, ref=pvs)
+    dxy_reco = lep.dxy
+    result = dxy_reco - dxy_gen
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ratio = ak.where((~ak.is_none(gen)) & (gen.status == 1) & (dxy_gen != 0), result / dxy_gen, np.nan)
+
+    return result if diff else ratio
+   
+def spin1_model(x, A, alpha):
+    """Physics model: dN/dCosTheta ~ A * (1 + alpha * cos^2(theta))"""
+    return A * (1 + alpha * x**2)
+
+def plot_and_fit_polarization(hist, ax=None, color='black', label_prefix="Data", fit_range=(0, 0.8), density=False):
+    """
+    Extracts data from a CosTheta histogram, fits the Spin-1 model, 
+    and plots Data + Fit + 1-Sigma Band.
+    
+    Args:
+        hist: The Coffea histogram object
+        ax: The matplotlib axis to plot on (creates new if None)
+        color: Color for the markers and fit line
+        label_prefix: String for the legend (e.g., "Gen Muons")
+        fit_range: Tuple (min, max) to restrict the fit (avoiding acceptance effects)
+        density (bool): If True, normalizes the histogram to unit area (probability density).
+                        Errors are scaled correctly to preserve statistical significance.
+    """
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 6))
+
+    hep.histplot(hist, ax=ax, yerr=True, density=density, color=color, 
+                 histtype='errorbar', marker='o', markersize=4, capsize=2, 
+                 label=label_prefix)
+
+    raw_counts = hist.values().flatten()
+    edges = hist.axes[-1].edges
+    centers = (edges[:-1] + edges[1:]) / 2
+
+    min_len = min(len(raw_counts), len(centers))
+    raw_counts = raw_counts[:min_len]
+    centers = centers[:min_len]
+
+    if density:
+        widths = edges[1:] - edges[:-1]
+        widths = widths[:min_len]
+        integral = np.sum(raw_counts * widths)
+        scale_factor = 1.0 / (integral if integral > 0 else 1.0)
+    else:
+        scale_factor = 1.0
+        
+    y_values = raw_counts * scale_factor
+    y_err = np.sqrt(raw_counts) * scale_factor 
+    y_err[y_err == 0] = scale_factor 
+
+    mask = (centers >= fit_range[0]) & (centers <= fit_range[1])
+    x_fit = centers[mask]
+    y_fit = y_values[mask]
+    y_err_fit = y_err[mask]
+    
+    p0 = [np.max(y_fit), 0.5]
+    
+    try:
+        popt, pcov = opt.curve_fit(
+            spin1_model, x_fit, y_fit, sigma=y_err_fit, absolute_sigma=True, p0=p0
+        )
+        A_opt, alpha_opt = popt
+        perr = np.sqrt(np.diag(pcov))
+        
+        x_model = np.linspace(0, 1, 100)
+        y_model = spin1_model(x_model, *popt)
+        
+        label_fit = f"Fit ($\\alpha={alpha_opt:.2f} \\pm {perr[1]:.2f}$)"
+        ax.plot(x_model, y_model, '-', color=color, linewidth=2, label=label_fit)
+        
+        # Confidence Band
+        jac = np.vstack([1 + alpha_opt * x_model**2, A_opt * x_model**2]).T
+        y_sigma = np.sqrt(np.sum((jac @ pcov) * jac, axis=1))
+        
+        ax.fill_between(x_model, y_model - y_sigma, y_model + y_sigma, 
+                        color=color, alpha=0.2)
+        
+        ax.axvline(fit_range[1], color=color, linestyle=':', alpha=0.3)
+
+    except Exception as e:
+        print(f"Fit failed for {label_prefix}: {e}")
+
+    hep.cms.label()
+    return ax
+
+def gaussian_model(x, A, mu, sigma):
+    """Standard Gaussian with a norm, mean, and sigma param"""
+    return A * np.exp(-0.5 * ((x - mu) / sigma)**2)
+
+def plot_and_fit_gaussian(hist, ax=None, color='black', label_prefix="Data", fit_range=(-3, 3), density=False):
+    """
+    Extracts data from a histogram, fits the standard Gaussian model, 
+    and plots Data + Fit.
+    
+    Args:
+        hist: The Coffea histogram object
+        ax: The matplotlib axis to plot on (creates new if None)
+        color: Color for the markers and fit line
+        label_prefix: String for the legend (e.g., "Gen Muons")
+        fit_range: Tuple (min, max) to restrict the fit (avoiding acceptance effects)
+        density (bool): If True, normalizes the histogram to unit area (probability density).
+                        Errors are scaled correctly to preserve statistical significance.
+    """
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 6))
+
+    hep.histplot(hist, ax=ax, yerr=True, density=density, color=color, 
+                 histtype='errorbar', marker='o', markersize=4, capsize=2, 
+                 label=label_prefix)
+
+    counts = hist.values().flatten()
+    edges = hist.axes[-1].edges
+    centers = (edges[:-1] + edges[1:]) / 2
+
+    if density:
+        widths = edges[1:] - edges[:-1]
+        integral = np.sum(counts * widths)
+        scale_factor = 1.0 / (integral if integral > 0 else 1.0)
+    else:
+        scale_factor = 1.0
+
+    y_fit = counts * scale_factor
+    y_err_fit = np.sqrt(counts) * scale_factor
+    y_err_fit[y_err_fit == 0] = scale_factor
+
+    mask = (centers >= fit_range[0]) & (centers <= fit_range[1])
+    x_fit = centers[mask]
+    y_fit = y_fit[mask]
+    y_err_fit = y_err_fit[mask]
+
+    if len(x_fit) > 0 and np.sum(y_fit) > 0:
+        mean_guess = np.average(x_fit, weights=y_fit)
+        sigma_guess = np.sqrt(np.average((x_fit - mean_guess)**2, weights=y_fit))
+        amp_guess = np.max(y_fit)
+    else:
+        mean_guess, sigma_guess, amp_guess = 0, 1, 1
+
+    p0 = [amp_guess, mean_guess, sigma_guess]
+    try:
+        popt, pcov = opt.curve_fit(
+            gaussian_model, x_fit, y_fit, sigma=y_err_fit, absolute_sigma=True, p0=p0
+        )
+        A_opt, mu_opt, sigma_opt = popt
+        
+        x_model = np.linspace(edges[0], edges[-1], 200)
+        y_model = gaussian_model(x_model, *popt)
+        
+        label_fit = rf"Fit: $\mu={mu_opt:.2f}, \sigma={abs(sigma_opt):.2f}$"
+        ax.plot(x_model, y_model, '-', color=color, linewidth=2, label=label_fit)
+        
+    except Exception as e:
+        print(f"Fit failed: {e}")
+
+    hep.cms.label()
+    return ax
