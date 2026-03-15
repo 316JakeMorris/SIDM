@@ -46161,7 +46161,7 @@ skimmed_llpNanoAOD_v2:
       - skimmed_output_0.root
       - skimmed_output_1.root
       - skimmed_output_10.root
-      - skimmed_output_100.root
+      # - skimmed_output_100.root #unrecognized compression algorithm: b'\xcd-'
       - skimmed_output_1000.root
       - skimmed_output_1001.root
       - skimmed_output_1002.root
@@ -46247,7 +46247,7 @@ skimmed_llpNanoAOD_v2:
       - skimmed_output_1075.root
       - skimmed_output_1076.root
       - skimmed_output_1077.root
-      - skimmed_output_1078.root
+      # - skimmed_output_1078.root #ValueError: unrecognized compression algorithm: b'\xa5\xbe'
       - skimmed_output_1079.root
       - skimmed_output_108.root
       - skimmed_output_1080.root
@@ -46266,7 +46266,7 @@ skimmed_llpNanoAOD_v2:
       - skimmed_output_1092.root
       - skimmed_output_1093.root
       - skimmed_output_1094.root
-      - skimmed_output_1095.root
+      # - skimmed_output_1095.root DeserializationError('attempting to get bytes 52250051:52250069\noutside expected range 52274213:52282828
       - skimmed_output_1096.root
       - skimmed_output_1097.root
       - skimmed_output_1098.root
@@ -46299,7 +46299,7 @@ skimmed_llpNanoAOD_v2:
       - skimmed_output_1122.root
       - skimmed_output_1123.root
       - skimmed_output_1124.root
-      - skimmed_output_1125.root
+      # - skimmed_output_1125.root #DeserializationError: while reading
       - skimmed_output_1126.root
       - skimmed_output_1127.root
       - skimmed_output_1128.root
@@ -46309,7 +46309,7 @@ skimmed_llpNanoAOD_v2:
       - skimmed_output_1131.root
       - skimmed_output_1132.root
       - skimmed_output_1133.root
-      - skimmed_output_1134.root
+      # - skimmed_output_1134.root DeserializationError: while reading
       - skimmed_output_1136.root
       - skimmed_output_1137.root
       - skimmed_output_1138.root
