@@ -46291,7 +46291,7 @@ skimmed_llpNanoAOD_v2:
       - skimmed_output_1114.root
       - skimmed_output_1115.root
       - skimmed_output_1116.root
-      - skimmed_output_1117.root
+      # - skimmed_output_1117.root #ValueError: unrecognized compression algorithm: b'\x99\x8d'
       - skimmed_output_1118.root
       - skimmed_output_1119.root
       - skimmed_output_112.root
@@ -46380,7 +46380,7 @@ skimmed_llpNanoAOD_v2:
       - skimmed_output_12.root
       - skimmed_output_120.root
       - skimmed_output_1200.root
-      - skimmed_output_1201.root
+      # - skimmed_output_1201.root #DeserializationError: while reading
       - skimmed_output_1202.root
       - skimmed_output_1203.root
       - skimmed_output_1204.root
