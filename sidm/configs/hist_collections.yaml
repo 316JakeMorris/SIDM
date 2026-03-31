@@ -113,6 +113,7 @@ lj_eta_study: &lj_eta_study
   - "lj_dsaMuon_eta"
   - "lj_electron_eta"
   - "lj_photon_eta"
+  - "lj_lj_invmass"
 
 
 mu_lj_base: &mu_lj_base

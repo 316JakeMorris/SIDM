@@ -194,6 +194,33 @@ base: &base
     - *evt_base
     - "2mu2e"
 
+#define some selections that will hopefully get us the signal region
+4mu_SR: &4mu_SR
+    <<: *4mu
+    postLj_obj_cuts:
+        ljs:
+          - *base_ljObjCut_ljIso_2lj
+          - "dPhi > 2"
+        egm_ljs:
+          - *base_ljObjCut_ljIso_2lj
+          - "displaced"
+        mu_ljs:
+          - *base_ljObjCut_ljIso_2lj
+          - "displaced"
+
+2mu2e_SR: &2mu2e_SR
+    <<: *2mu2e
+    postLj_obj_cuts:
+        ljs:
+          - *base_ljObjCut_ljIso_2lj
+          - "dPhi > 2"
+        egm_ljs:
+          - *base_ljObjCut_ljIso_2lj
+          - "displaced"
+        mu_ljs:
+          - *base_ljObjCut_ljIso_2lj
+          - "displaced"
+
 #selection on base_ljObjCut
 base_ljObjCut_pixelHits_as_ljSource: &base_ljObjCut_pixelHits_as_ljSource
   obj_cuts:
