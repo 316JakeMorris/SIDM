@@ -3821,7 +3821,7 @@ hist_defs = {
     ),
     
     
-    #--LJ Constituents Eta Study---------------------------------------------------------------------------------------------
+#-----------LJ Constituents Eta Study---------------------------------------------------------------------------------------------
     "lj_muon_eta": h.Histogram(
         [
             h.Axis(hist.axis.Regular(50, -3, 3, name="lj_mu_eta"),
@@ -3853,6 +3853,43 @@ hist_defs = {
             h.Axis(hist.axis.Regular(50, -3, 3, name="lj_photon_eta"),
                    lambda objs, mask: objs["ljs"].photons.eta),
         ],
+    ),
+#--------------Masked Histograms Below-------------------------------------------------------------------------------------------------------------------------------------------------------
+    "lj_muon_eta_dPhiMask": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(50, -3, 3, name="lj_mu_eta"),
+                   lambda objs, mask: objs["ljs"][mask].pfMuons.eta), 
+                    # muon1.eta -> eta1
+                    # [muon1, muon2].eta -> [eta1, eta2] ? 
+                    #Should I use .muons or .pfMuons?
+                    #objs["ljs"][mask, :2].muons.eta??? 
+                    #Should I limit to just the mask and then the first two objects in the LJ?
+                    #What does .muons return? Presumably a list of all of the muons?
+                    #Does .eta work on whatever .muons returns?
+                    #If it does, and it returns a list of eta values for each muon in the list, does whatever .eta returns work to correctly generate the histogram?
+        ],
+        evt_mask=lambda objs: (abs(objs["ljs"][:, 0].delta_phi(objs["ljs"][:, 1])) > 2)
+    ),        
+    "lj_dsaMuon_eta_dPhiMask": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(50, -3, 3, name="lj_dsaMu_eta"),
+                   lambda objs, mask: objs["ljs"][mask].dsaMuons.eta),
+        ],
+        evt_mask=lambda objs: (ak.num(objs["ljs"]) > 1) & (abs(objs["ljs"][:, 0].delta_phi(objs["ljs"][:, 1])) > 2)
+    ),
+    "lj_electron_eta_dPhiMask": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(50, -3, 3, name="lj_ele_eta"),
+                   lambda objs, mask: objs["ljs"][mask].electrons.eta),
+        ],
+        evt_mask=lambda objs: (ak.num(objs["ljs"]) > 1) & (abs(objs["ljs"][:, 0].delta_phi(objs["ljs"][:, 1])) > 2)
+    ),
+    "lj_photon_eta_dPhiMask": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(50, -3, 3, name="lj_photon_eta"),
+                   lambda objs, mask: objs["ljs"][mask].photons.eta),
+        ],
+        evt_mask=lambda objs: (ak.num(objs["ljs"]) > 1) & (abs(objs["ljs"][:, 0].delta_phi(objs["ljs"][:, 1])) > 2)
     ),
 #-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     # Bound State Kinematics

@@ -4,7 +4,7 @@
 import awkward as ak
 # local
 from sidm.definitions.objects import derived_objs
-from sidm.tools.utilities import dR, lxy, rho, check_bits, returnBitMapTArrayPhoton, dR_outer
+from sidm.tools.utilities import dR, lxy, rho, check_bits, returnBitMapTArrayPhoton, dR_outer, dPhi
 
 obj_cut_defs = {
     "pvs": {
@@ -36,7 +36,7 @@ obj_cut_defs = {
         "pfDsaMuLj": lambda objs: (ak.num(objs["ljs"].pfMuons) > 0) & (ak.num(objs["ljs"].dsaMuons) > 0),
         "lj_iso < 0.1": lambda objs: objs["ljs"].isolation < 0.1,
         "lj_iso < 0.2": lambda objs: objs["ljs"].isolation < 0.2,
-        "dPhi > 2": lambda objs: (abs(objs["ljs"][:, 1].phi - objs["ljs"][:, 0].phi) > 2.0)
+        "dPhi > 2": lambda objs: abs(dPhi(objs["ljs"], objs["ljs"])) > 2
     },
     "egm_ljs": {
         "eLj": lambda objs: (objs["egm_ljs"].electron_n > 0) & (objs["egm_ljs"].photon_n == 0),
@@ -50,7 +50,7 @@ obj_cut_defs = {
         "egm_lj_iso < 0.2": lambda objs: objs["egm_ljs"].isolation < 0.2,
         "lostHits >= 1": lambda objs: ak.min(objs["egm_ljs"].electrons.trkNumPixelHits, axis=-1) >= 1,
         "displaced": lambda objs: (ak.min(objs["egm_ljs"].egamma.lostHits, axis=-1) >= 1),
-        "dPhi > 2": lambda objs: (abs(objs["egm_ljs"][:, 1].phi - objs["egm_ljs"][:, 0].phi) > 2.0)
+        "dPhi > 2": lambda objs: abs(dPhi(objs["egm_ljs"], objs["egm_ljs"])) > 2
     },
     "mu_ljs": {
         "pfMuLj": lambda objs: (objs["mu_ljs"].pfMu_n > 0) & (objs["mu_ljs"].dsaMu_n == 0),
@@ -60,7 +60,7 @@ obj_cut_defs = {
         "mu_lj_iso < 0.1": lambda objs: objs["mu_ljs"].isolation < 0.1,
         "pf_pixelhits <= 2": lambda objs: ak.max(objs["mu_ljs"].pfMuons.trkNumPixelHits, axis=-1) <= 2,
         "displaced": lambda objs: (ak.max(objs["mu_ljs"].muons.trkNumPixelHits, axis=-1) <= 2) ,
-        "dPhi > 2": lambda objs: (abs(objs["mu_ljs"][:, 1].phi - objs["mu_ljs"][:, 0].phi) > 2.0)
+        "dPhi > 2": lambda objs: abs(dPhi(objs["mu_ljs"], objs["mu_ljs"])) > 2
     },
     "genMus":{
         "pT >= 10 GeV": lambda objs: objs["genMus"].pt >= 10,

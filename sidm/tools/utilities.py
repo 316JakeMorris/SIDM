@@ -63,6 +63,25 @@ def as_int(array):
     """Return array with values converted to ints"""
     return ak.values_astype(array, "int64")
 
+def delta_phi(obj1, obj2):
+    return obj1.phi - obj2.phi
+
+def dPhi(obj1, obj2):
+    """Return dPhi between obj1 and the nearest obj2; returns inf if no obj2 is found"""
+    # print(f"obj1 {obj1.phi}\n")
+    # print(f"{type(obj1)}")
+    # print(f"what does obj1.nearest(obj2).phi look like? {obj1.nearest(obj2)[0].phi}")
+    # print(f"Do we have obj1.phi? {obj1.phi}")
+    # print(f"What does obj1[1].phi look like? {obj1[1].eta}")
+    # dPhi = obj1[:, 1] - obj2[:, 0]
+    # dPhi = obj1.phi - obj1.nearest(obj2).phi #This is the closest I've gotten but it seems to just 0 everything out. 
+    # print(f"TEST: {test}")
+    dPhi = obj1.nearest(obj2, return_metric=True, metric=delta_phi)[1]
+    # metric_table = obj1.metric_table(obj2, metric=delta_phi)
+    # print(f"Metric Table: {metric_table}")
+    # print(f"testing something {metric_table}")
+    return ak.fill_none(dPhi, np.inf)
+
 def dR(obj1, obj2):
     """Return dR between obj1 and the nearest obj2; returns inf if no obj2 is found"""
     dr = obj1.nearest(obj2, return_metric=True)[1]

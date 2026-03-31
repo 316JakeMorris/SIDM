@@ -194,33 +194,6 @@ base: &base
     - *evt_base
     - "2mu2e"
 
-#define some selections that will hopefully get us the signal region
-4mu_SR: &4mu_SR
-    <<: *4mu
-    postLj_obj_cuts:
-        ljs:
-          - *base_ljObjCut_ljIso_2lj
-          - "dPhi > 2"
-        egm_ljs:
-          - *base_ljObjCut_ljIso_2lj
-          - "displaced"
-        mu_ljs:
-          - *base_ljObjCut_ljIso_2lj
-          - "displaced"
-
-2mu2e_SR: &2mu2e_SR
-    <<: *2mu2e
-    postLj_obj_cuts:
-        ljs:
-          - *base_ljObjCut_ljIso_2lj
-          - "dPhi > 2"
-        egm_ljs:
-          - *base_ljObjCut_ljIso_2lj
-          - "displaced"
-        mu_ljs:
-          - *base_ljObjCut_ljIso_2lj
-          - "displaced"
-
 #selection on base_ljObjCut
 base_ljObjCut_pixelHits_as_ljSource: &base_ljObjCut_pixelHits_as_ljSource
   obj_cuts:
@@ -341,6 +314,44 @@ base_ljObjCut_ljIso_2lj_endcap: &base_ljObjCut_ljIso_2lj_endcap
     - *evt_baseNoLj
     - ">=1 egm_ljs"
     - ">=1 mu_ljs"
+
+#define some selections that will hopefully get us the signal region
+# 4mu_SR: &4mu_SR #this form, suggested at the meeting, doesn't seem to work. I think it's cause base_ljObjCut_ljIso_2lj has obj_cuts that can't be applied at this level
+#     <<: *4mu
+#     postLj_obj_cuts:
+#         ljs:
+#           - *base_ljObjCut_ljIso_2lj
+#           - "dPhi > 2"
+#         egm_ljs:
+#           - *base_ljObjCut_ljIso_2lj
+#           - "displaced"
+#         mu_ljs:
+#           - *base_ljObjCut_ljIso_2lj
+#           - "displaced"
+#It was suggested that this form would override some cuts. TODO: Investigate cutflow
+4mu_SR: &4mu_SR
+    <<: *4mu
+    <<: *base_ljObjCut_ljIso_2lj
+    postLj_obj_cuts:
+        # ljs:
+        #   - "dPhi > 2"
+        egm_ljs:
+          - "displaced"
+        mu_ljs:
+          - "displaced"
+
+2mu2e_SR: &2mu2e_SR
+    <<: *2mu2e
+    postLj_obj_cuts:
+        ljs:
+          - *base_ljObjCut_ljIso_2lj
+          - "dPhi > 2"
+        egm_ljs:
+          - *base_ljObjCut_ljIso_2lj
+          - "displaced"
+        mu_ljs:
+          - *base_ljObjCut_ljIso_2lj
+          - "displaced"
 
 base_ljObjCut_ljIso_2pf: &base_ljObjCut_ljIso_2pf
   obj_cuts:
