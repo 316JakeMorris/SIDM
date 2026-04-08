@@ -316,29 +316,52 @@ base_ljObjCut_ljIso_2lj_endcap: &base_ljObjCut_ljIso_2lj_endcap
     - ">=1 mu_ljs"
 
 #define some selections that will hopefully get us the signal region
-# 4mu_SR: &4mu_SR #this form, suggested at the meeting, doesn't seem to work. I think it's cause base_ljObjCut_ljIso_2lj has obj_cuts that can't be applied at this level
-#     <<: *4mu
-#     postLj_obj_cuts:
-#         ljs:
-#           - *base_ljObjCut_ljIso_2lj
-#           - "dPhi > 2"
-#         egm_ljs:
-#           - *base_ljObjCut_ljIso_2lj
-#           - "displaced"
-#         mu_ljs:
-#           - *base_ljObjCut_ljIso_2lj
-#           - "displaced"
-#It was suggested that this form would override some cuts. TODO: Investigate cutflow
+#This is a combination of the &4mu and &base_ljObjCut_ljIso_2lj selections. However, there is no easy way to combine two selections, 
+#ESPECIALLY if they are extremely nested and referential to other selections. Used a tool called yq to explode the selections.yaml
+#and then I manually combined &4u and &base_ljObjCut_ljIso_2lj. Interestingly, the only thing I added was "mu_lj_iso < 0.1" and "egm_lj_iso < 0.2". 
+#Exact command yq 'explode(.) selections.yaml'
 4mu_SR: &4mu_SR
-    <<: *4mu
-    <<: *base_ljObjCut_ljIso_2lj
-    postLj_obj_cuts:
-        # ljs:
-        #   - "dPhi > 2"
-        egm_ljs:
-          - "displaced"
-        mu_ljs:
-          - "displaced"
+  obj_cuts:
+    genMus:
+      - "status 1"
+    genEs:
+      - "status 1"
+    electrons:
+      - "pT > 10 GeV"
+      - "|eta| < 2.4"
+      - 'MVANonIsoWPL'
+    muons:
+      - "looseID"
+      - "pT > 5 GeV"
+      - "|eta| < 2.4"
+    photons:
+      - "pT > 20 GeV"
+      - "|eta| < 2.5"
+      - 'Custom Cutbased'
+      - "pixelSeed"
+      - 'Photon DR Veto 0p025'
+    dsaMuons:
+      - "pT > 10 GeV"
+      - "|eta| < 2.4"
+      - "displaced ID"
+      - "all" # cross-cleaning
+  postLj_obj_cuts:
+    ljs:
+      - "pT > 30 GeV"
+      - "|eta| < 2.4"
+      - "mu_charge == 0"
+    mu_ljs:
+      - "mu_lj_iso < 0.1"
+    egm_ljs:
+      - "egm_lj_iso < 0.2"
+  evt_cuts:
+    - - - - evt_cuts:
+              - "pass triggers"
+          - - "PV filter"
+      - ">=2 LJs"
+    - "4mu"
+    - ">=1 egm_ljs"
+    - ">=1 mu_ljs"
 
 2mu2e_SR: &2mu2e_SR
     <<: *2mu2e
