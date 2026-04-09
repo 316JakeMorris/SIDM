@@ -319,7 +319,7 @@ base_ljObjCut_ljIso_2lj_endcap: &base_ljObjCut_ljIso_2lj_endcap
 #This is a combination of the &4mu and &base_ljObjCut_ljIso_2lj selections. However, there is no easy way to combine two selections, 
 #ESPECIALLY if they are extremely nested and referential to other selections. Used a tool called yq to explode the selections.yaml
 #and then I manually combined &4u and &base_ljObjCut_ljIso_2lj. Interestingly, the only thing I added was "mu_lj_iso < 0.1" and "egm_lj_iso < 0.2". 
-#Exact command yq 'explode(.) selections.yaml'
+#Exact command yq 'explode(.)' selections.yaml'
 4mu_SR: &4mu_SR
   obj_cuts:
     genMus:
@@ -352,8 +352,10 @@ base_ljObjCut_ljIso_2lj_endcap: &base_ljObjCut_ljIso_2lj_endcap
       - "mu_charge == 0"
     mu_ljs:
       - "mu_lj_iso < 0.1"
+      - "displaced"
     egm_ljs:
       - "egm_lj_iso < 0.2"
+      - "displaced"
   evt_cuts:
     - - - - evt_cuts:
               - "pass triggers"
@@ -362,6 +364,7 @@ base_ljObjCut_ljIso_2lj_endcap: &base_ljObjCut_ljIso_2lj_endcap
     - "4mu"
     - ">=1 egm_ljs"
     - ">=1 mu_ljs"
+    - "dPhi(LJ_0, LJ_1) > 2"
 
 2mu2e_SR: &2mu2e_SR
     <<: *2mu2e
