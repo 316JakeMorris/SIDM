@@ -364,7 +364,7 @@ base_ljObjCut_ljIso_2lj_endcap: &base_ljObjCut_ljIso_2lj_endcap
     - "4mu"
     - ">=1 egm_ljs"
     - ">=1 mu_ljs"
-    - "dPhi(LJ_0, LJ_1) > 2"
+    # - "dPhi(LJ_0, LJ_1) > 2"
 
 2mu2e_SR: &2mu2e_SR
     <<: *2mu2e
