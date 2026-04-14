@@ -228,6 +228,7 @@ evt_cut_defs = {
     "egm_ljs = 0": lambda objs: ak.num(objs["egm_ljs"]) == 0,
     ">=1 egm_ljs": lambda objs: ak.num(objs["egm_ljs"]) >= 1,
     ">=1 mu_ljs": lambda objs: ak.num(objs["mu_ljs"]) >= 1,
+    ">=2 mu_ljs": lambda objs: ak.num(objs["mu_ljs"]) >= 2,
     ">=2 matched As": lambda objs: ak.num(derived_objs["genAs_matched_lj"](objs, 0.2)) >= 2,
     # 4mu: leading two LJs are both mu-type
     "4mu": lambda objs: ak.count_nonzero(objs["ljs"][:, :2].muon_n >= 2, axis=-1) == 2,
