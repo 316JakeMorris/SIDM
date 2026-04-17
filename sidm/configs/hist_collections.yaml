@@ -1,4 +1,4 @@
-# Config to define all available collections of histograms
+# ConfiStarwarsguy2to define all available collections of histograms
 # Previously defined collections can be imported with '<<' or '*'
 # Any nested collections created by "<<" or '*' operations will be flattened in sidm_processor.py
 

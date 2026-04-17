@@ -367,6 +367,54 @@ base_ljObjCut_ljIso_2lj_endcap: &base_ljObjCut_ljIso_2lj_endcap
     - ">=2 mu_ljs"
     # - "dPhi(LJ_0, LJ_1) > 2"
 
+4mu_SR_DSA_barrel: &4mu_SR_DSA_barrel
+  obj_cuts:
+    genMus:
+      - "status 1"
+    genEs:
+      - "status 1"
+    electrons:
+      - "pT > 10 GeV"
+      - "|eta| < 2.4"
+      - 'MVANonIsoWPL'
+    muons:
+      - "looseID"
+      - "pT > 5 GeV"
+      - "|eta| < 2.4"
+    photons:
+      - "pT > 20 GeV"
+      - "|eta| < 2.5"
+      - 'Custom Cutbased'
+      - "pixelSeed"
+      - 'Photon DR Veto 0p025'
+    dsaMuons:
+      - "pT > 10 GeV"
+      - "|eta| < 2.4"
+      - "displaced ID"
+      - "all" # cross-cleaning
+      - "barrel" #restrict DSA muons to the barrel (eta < 1.479) because outside the barrel we saw a decrease in signal such that it was covered by bkg.
+  postLj_obj_cuts:
+    ljs:
+      - "pT > 30 GeV"
+      - "|eta| < 2.4"
+      - "mu_charge == 0"
+    mu_ljs:
+      - "mu_lj_iso < 0.1"
+      - "displaced"
+    egm_ljs:
+      - "egm_lj_iso < 0.2"
+      - "displaced"
+  evt_cuts:
+    - - - - evt_cuts:
+              - "pass triggers"
+          - - "PV filter"
+      - ">=2 LJs"
+    - "4mu"
+    # - ">=1 egm_ljs" #Could also apply a egm_ljs == 0 in order to get an 4mu region that is orthogonal to the 2mu2e region. 
+    - "egm_ljs = 0"
+    - ">=2 mu_ljs"
+    # - "dPhi(LJ_0, LJ_1) > 2"
+
 2mu2e_SR: &2mu2e_SR
     <<: *2mu2e
     postLj_obj_cuts:
