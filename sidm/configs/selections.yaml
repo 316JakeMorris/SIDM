@@ -363,9 +363,9 @@ base_ljObjCut_ljIso_2lj_endcap: &base_ljObjCut_ljIso_2lj_endcap
       - ">=2 LJs"
     - "4mu"
     # - ">=1 egm_ljs" #Could also apply a egm_ljs == 0 in order to get an 4mu region that is orthogonal to the 2mu2e region. 
-    - "egm_ljs = 0"
-    - ">=2 mu_ljs"
-    # - "dPhi(LJ_0, LJ_1) > 2"
+    # - "egm_ljs = 0" #removed because the 4mu cut makes us orthogonal to the 2mu2e signal region anyways. 
+    # - ">=2 mu_ljs" #Removed because comparable to 4mu cut
+    # - "dPhi(LJ_0, LJ_1) > 2" #Done by mask until we get sequential event cuts
 
 4mu_SR_DSA_barrel: &4mu_SR_DSA_barrel
   obj_cuts:
@@ -411,8 +411,8 @@ base_ljObjCut_ljIso_2lj_endcap: &base_ljObjCut_ljIso_2lj_endcap
       - ">=2 LJs"
     - "4mu"
     # - ">=1 egm_ljs" #Could also apply a egm_ljs == 0 in order to get an 4mu region that is orthogonal to the 2mu2e region. 
-    - "egm_ljs = 0"
-    - ">=2 mu_ljs"
+    # - "egm_ljs = 0" #removed because the 4mu cut makes us orthogonal to the 2mu2e signal region anyways. 
+    # - ">=2 mu_ljs" #Removed because comparable to 4mu cut
     # - "dPhi(LJ_0, LJ_1) > 2"
 
 2mu2e_SR: &2mu2e_SR
