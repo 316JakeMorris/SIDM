@@ -118,6 +118,7 @@ lj_eta_study: &lj_eta_study
   - "lj_electron_eta_dPhiMask"
   - "lj_photon_eta_dPhiMask"
   - "lj_lj_invmass"
+  - "lj_lj_invmass_dPhiMask"
 
 
 mu_lj_base: &mu_lj_base
