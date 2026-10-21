@@ -1,17 +1,16 @@
 """Module to define the Selection and JaggedSelection classes"""
 
 # columnar analysis
-from coffea.analysis_tools import PackedSelection
+import awkward as ak
 # local
 from sidm.definitions.cuts import evt_cut_defs, obj_cut_defs
+from sidm.tools.cutflow import SimpleCutflow
 import traceback
-
 
 class Selection:
     """Class to represent the collection of cuts that define a Selection
 
     A selection consists of event-level cuts which reject whole events.
-    Cuts are stored as a PackedSelection.
 
     All available cuts are defined in sidm.definitions.cuts. The specific cuts that define each
     selection are accepted by Selection() as lists of strings.
@@ -19,28 +18,53 @@ class Selection:
 
     def __init__(self, cuts, verbose=False):
         self.evt_cuts = cuts # list of names of cuts to be applied
-        self.all_evt_cuts = PackedSelection() # will be filled later when cuts are evaluated
+        self.cutflow = SimpleCutflow() # will be filled later when cuts are evaluated
         self.verbose = verbose
 
     def apply_evt_cuts(self, objs):
         """Evaluate all event cuts and apply results to object collections"""
-
-        # evaluate all selected cuts
+        self.cutflow.add_row("None", ak.count(objs["evt_weights"]), ak.sum(objs["evt_weights"]))
+        sel_objs = objs.copy()
         for cut in self.evt_cuts:
+            # evaluate cuts
             if self.verbose:
                 print("Applying cut:", cut)
             try:
-                self.all_evt_cuts.add(cut, evt_cut_defs[cut](objs))
+                mask = evt_cut_defs[cut](sel_objs)
             except Exception as e:
+                # An I/O failure means an unreadable chunk, not an unevaluable cut.
+                if isinstance(e, OSError) or "I/O operation" in str(e):
+                    raise
+                # A collection absent from this sample (a gen-level cut on data)
+                # means the cut does not apply here, not that it is broken;
+                # report it the way JaggedSelection.apply_obj_cuts already does
+                # for object cuts on a missing collection.
+                if (isinstance(e, KeyError) and e.args and isinstance(e.args[0], str)
+                        and e.args[0] != cut and e.args[0] not in sel_objs):
+                    print(f"Warning: {e.args[0]} not found in sample. "
+                          f"The following cuts will not be applied: ['{cut}']")
+                    continue
                 print(f"Warning: Unable to evaluate {cut} Skipping.",e)
+                # Skip this cut entirely. Event cuts were once collected and
+                # applied together as a single AND after the loop, where falling
+                # through here was harmless. They are now evaluated and applied
+                # one at a time against the progressively slimmed collections,
+                # so without this the loop below would re-apply the PREVIOUS
+                # cut's mask and log a cutflow row under this cut's name.
+                continue
 
-        # apply event cuts to object collections
-        sel_objs = {}
-        for name, obj in objs.items():
-            try:
-                sel_objs[name] = obj[self.all_evt_cuts.all(*self.evt_cuts)]
-            except:
-                print(f"Warning: Unable to apply event cuts to {name}. Skipping.")
+            # apply to all object collections
+            for name, obj in sel_objs.items():
+                try:
+                    sel_objs[name] = obj[mask]
+                    if name == "evt_weights":
+                        self.cutflow.add_row(cut, ak.count(sel_objs[name]), ak.sum(sel_objs[name]))
+                except Exception as e:
+                    if isinstance(e, OSError) or "I/O operation" in str(e):
+                        raise
+                    print(f"Warning: Unable to apply event cuts to {name}. Skipping. "
+                          f"({type(e).__name__}: {e})")
+
         return sel_objs
 
 
@@ -78,6 +102,8 @@ class JaggedSelection:
                     else:
                         sel_objs[obj] = sel_objs[obj][obj_cut_defs[obj][cut](sel_objs)]
                 except Exception as e:
+                    if isinstance(e, OSError) or "I/O operation" in str(e):
+                        raise
                     print(f"Warning: Unable to apply {cut} for {obj}. Skipping. Error message: {e}")
                     traceback.print_exc()
         return sel_objs
