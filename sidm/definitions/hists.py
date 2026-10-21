@@ -11,13 +11,14 @@ import importlib
 # columnar analysis
 import hist
 import awkward as ak
+import numpy as np
 # local
 from sidm.tools import histogram as h
-from sidm.tools.utilities import dR, lxy, matched, dxy, lepton_dxy_resolution
-from sidm.definitions.objects import derived_objs
+from sidm.tools.utilities import dR, lxy, lxyz, lxyz_proper, betagamma, matched, dxy, lepton_dxy_resolution, cosAlpha, nearest_lj_index, get_pairs
+from sidm.definitions.objects import derived_objs, withMass
 # always reload local modules to pick up changes during development
 importlib.reload(h)
-import numpy as np
+
 
 def testing(objs, mask):
     print("I RAN. I RAN SO FAR AWAY!")
@@ -128,7 +129,7 @@ def boost_to_frame(daughter, parent, mass=-1):
 
 def cos_theta_in_parent_frame(objs, mask, obj_name, mass=-1):
     """
-    Calculates the cosine of the angle between the object in the rest frame 
+    Calculates the cosine of the angle between the object in the rest frame
     of its parent and the parent's flight direction in the Lab frame.
     """
     import numpy
@@ -173,6 +174,16 @@ def lab_pt_ratio(objs, mask, lep_name):
     leading_pt = sorted_parts[:, 0].pt
     subleading_pt = sorted_parts[:, 1].pt
     return subleading_pt / leading_pt
+
+def decayed_daughter_pairs(objs, mask, obj_name):
+    """Dark photons with at least two recorded children, for pairwise daughter quantities."""
+    parts = objs[obj_name][mask]
+    return parts[ak.num(parts.children, axis=2) >= 2]
+
+def daughters_dR(objs, mask, obj_name):
+    """dR between the two daughters of each dark photon (one entry per dark photon)."""
+    children = decayed_daughter_pairs(objs, mask, obj_name).children
+    return children[:, :, 0].delta_r(children[:, :, 1])
 
 hist_defs = {
     # pv
@@ -359,9 +370,9 @@ hist_defs = {
             h.Axis(hist.axis.Regular(100, 0, 500, name="genA_lxy",
                                      label=r"Dark photon $L_{xy}$ [cm]"),
                    lambda objs, mask: lxy(objs["genAs_toE"])),
-            # number of electrons within dR=0.5 of a genA that decays to electrons
+            # electrons within dR=0.5, counted per dark photon (matches the per-genA lxy axis)
             h.Axis(hist.axis.Integer(0, 4, name="electron_nearGenA_n", label="$N_{e}$"),
-                   lambda objs, mask: ak.num(matched(objs["electrons"], objs["genAs_toE"], 0.5))),
+                   lambda objs, mask: ak.sum(objs["genAs_toE"].metric_table(objs["electrons"]) < 0.5, axis=-1)),
         ],
     ),
     "electron_genA_dR": h.Histogram(
@@ -386,6 +397,9 @@ hist_defs = {
                    lambda objs, mask: dR(objs["electrons"],  objs["electrons"].matched_gen[objs["electrons"].matched_gen.status == 1]))
         ],
     ),
+    #jets
+    "jet_n": obj_attr("jets", "n"),
+    "bjet_n": obj_attr("bjets", "n"),
     # pfphoton
     "photon_n": obj_attr("photons", "n"),
     "photon_pt":obj_attr("photons", "pt", xmax=500),
@@ -416,9 +430,9 @@ hist_defs = {
             h.Axis(hist.axis.Regular(100, 0, 500, name="genA_lxy",
                                      label=r"Dark photon $L_{xy}$ [cm]"),
                    lambda objs, mask: lxy(objs["genAs_toE"])),
-            # number of photons within dR=0.5 of a genA that decays to electrons
+            # photons within dR=0.5, counted per dark photon (matches the per-genA lxy axis)
             h.Axis(hist.axis.Integer(0, 4, name="photon_nearGenA_n", label=r"$N_{\gamma}$"),
-                   lambda objs, mask: ak.num(matched(objs["photons"], objs["genAs_toE"], 0.5))),
+                   lambda objs, mask: ak.sum(objs["genAs_toE"].metric_table(objs["photons"]) < 0.5, axis=-1)),
         ],
     ),
     "photon_genA_dR": h.Histogram(
@@ -436,10 +450,13 @@ hist_defs = {
                    lambda objs, mask: dR(objs["photons"], objs["genEs"]))
         ],
     ),
+    #met
+    "met_pt":obj_attr("met", "pt", xmax=500),
     # pfmuon
     "muon_n": obj_attr("muons", "n"),
     "muon_pt":obj_attr("muons", "pt", xmax=500),
     "muon_dxy":obj_attr("muons", "dxy"),
+    "muon_dz":obj_attr("muons", "dz"),
     "muon_dxy_XXXXLowRange": obj_attr("muons", "dxy", xmax=0.01),
     "muon_dxy_XXXLowRange": obj_attr("muons", "dxy", xmax=0.1),
     "muon_dxy_XXLowRange": obj_attr("muons", "dxy", xmax=0.2),
@@ -477,9 +494,9 @@ hist_defs = {
             h.Axis(hist.axis.Regular(100, 0, 500, name="genA_lxy",
                                      label=r"Dark photon $L_{xy}$ [cm]"),
                    lambda objs, mask: lxy(objs["genAs_toMu"])),
-            # number of muons within dR=0.5 of a genA that decays to muons
+            # PF muons within dR=0.5, counted per dark photon (matches the per-genA lxy axis)
             h.Axis(hist.axis.Integer(0, 4, name="muon_nearGenA_n", label=r"$N_{\mu^{PF}}$"),
-                   lambda objs, mask: ak.num(matched(objs["muons"], objs["genAs_toMu"], 0.5))),
+                   lambda objs, mask: ak.sum(objs["genAs_toMu"].metric_table(objs["muons"]) < 0.5, axis=-1)),
         ],
     ),
     "muon_genA_dR": h.Histogram(
@@ -496,6 +513,31 @@ hist_defs = {
             h.Axis(hist.axis.Regular(50, 0, 2*math.pi, name="muon_genMu_dR"),
                    lambda objs, mask: dR(objs["muons"], objs["genMus"]))
         ],
+    ),
+    "muon_muon_invmass": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(150, 0, 150, name="muon_muon_mass",
+                                     label=r"Invariant Mass ($\mu_{0}$, $\mu_{1}$)"),
+                   lambda objs, mask: objs["muons"][mask, :2].sum().mass),
+        ],
+        evt_mask=lambda objs: ak.num(objs["muons"]) > 1,
+    ),
+    "muon_muon_invmass_highRange": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 400, name="muon_muon_mass",
+                                     label=r"Invariant Mass ($\mu_{0}$, $\mu_{1}$)"),
+                   lambda objs, mask: objs["muons"][mask, :2].sum().mass),
+        ],
+        evt_mask=lambda objs: ak.num(objs["muons"]) > 1,
+    ),
+    "muon_muon_dphi": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(50, 0, 6.28, name="muon_muon_dphi",
+                                     label=r"$\Delta R$($\mu_0$, $\mu_1$)"),
+                   lambda objs, mask: objs["muons"][mask, 1].delta_r(
+                       objs["muons"][mask, 0])),
+        ],
+        evt_mask=lambda objs: ak.num(objs["muons"]) > 1,
     ),
     "muon_genMu_matched_dR": h.Histogram(
         [
@@ -630,9 +672,16 @@ hist_defs = {
     "dsaMuon_n": obj_attr("dsaMuons", "n"),
     "dsaMuon_pt":obj_attr("dsaMuons", "pt", xmax=500),
     "dsaMuon_dxy":obj_attr("dsaMuons", "dxy"),
+
     "dsaMuon_eta_phi": obj_eta_phi("dsaMuons"),
     "dsaMuon_absD0": obj_attr("dsaMuons", "dxy", absval=True, xmax=500),
     "dsaMuon_absD0_lowRange": obj_attr("dsaMuons", "dxy", absval=True, xmax=10),
+    "dsaMuon_dz": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(300, 0, 300, name=r"$DSA $\mu$ dz (cm)"),
+                   lambda objs, mask: abs(objs["dsaMuons"].dz)),
+        ],
+    ),
     "dsaMuon_nearGenA_n": h.Histogram(
         [
             # number of muons within dR=0.5 of a genA that decays to muons
@@ -652,7 +701,6 @@ hist_defs = {
                    lambda objs, mask: objs["dsaMuons"].good_matched_muons[:,:,:1].numMatch),#Also works! idk if the result makes sense, but it runs
         ],
     ),
-
     # dsamuon-genA
     "dsaMuon_nearGenA_n_genA_lxy": h.Histogram(
         [
@@ -660,9 +708,9 @@ hist_defs = {
             h.Axis(hist.axis.Regular(100, 0, 500, name="genA_lxy",
                                      label=r"Dark photon $L_{xy}$ [cm]"),
                    lambda objs, mask: lxy(objs["genAs_toMu"])),
-            # number of dsaMuons within dR=0.5 of a genA that decays to muons
+            # DSA muons within dR=0.5, counted per dark photon (matches the per-genA lxy axis)
             h.Axis(hist.axis.Integer(0, 4, name="dsaMuon_nearGenA_n", label=r"$N_{\mu^{DSA}}$"),
-                   lambda objs, mask: ak.num(matched(objs["dsaMuons"], objs["genAs_toMu"], 0.5))),
+                   lambda objs, mask: ak.sum(objs["genAs_toMu"].metric_table(objs["dsaMuons"]) < 0.5, axis=-1)),
         ],
     ),
     "dsaMuon_genA_dR": h.Histogram(
@@ -680,14 +728,86 @@ hist_defs = {
                    lambda objs, mask: dR(objs["dsaMuons"], objs["genMus"]))
         ],
     ),
+    #Leading vs subleading muon
+    "all_muon0_pt_vs_all_muon1_pt": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 100, name="all_muon0_pt",
+                                     label="Leading Event Muon (PF or DSA) pT [GeV]"),
+                   lambda objs, mask: ak.sort(
+                       ak.concatenate([objs["muons"].pt, objs["dsaMuons"].pt], axis=-1),
+                       axis=-1, ascending=False
+                   )[mask, 0]),
+            h.Axis(hist.axis.Regular(100, 0, 100, name="all_muon1_pt",
+                                     label="Sub-leading Event Muon (PF or DSA) pT [GeV]"),
+                   lambda objs, mask: ak.sort(
+                       ak.concatenate([objs["muons"].pt, objs["dsaMuons"].pt], axis=-1),
+                       axis=-1, ascending=False
+                   )[mask, 1]),
+        ],
+        evt_mask=lambda objs: (ak.num(objs["muons"]) + ak.num(objs["dsaMuons"])) > 1,
+    ),
+    # Muon pT score per lepton jet:
+        # 0 = no muons in the jet have pt > 26 GeV
+        # 1 = only the leading muon in the jet has pt > 26 GeV
+        # 1.5 = both the leading and subleading muon in the jet have pt > 26 GeV
+        #
+        # Interpretation of sum over two LJs:
+        # 3.0: All 4 muons have pt > 26 GeV
+        # 2.5: One LJ has two muons with pt > 26 and the other has one
+        # 2.0: Scenario B (each dark photon produces a muon with pt > 26)
+        # 1.5: Scenario A (a single dark photon contributes both muons)
+        # 1.0: Only 1 muon in the event has pt > 26 GeV
+        # 0.0: No muons in the event have pt > 26 GeV
+    "mu_lj_sum_pt_score": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(7, 0, 3.5, name="sum_pt_score",
+                                     label="Sum of LJ Muon pT Scores"),
+                   lambda objs, mask: (
+                       ak.where(ak.sum(objs["mu_ljs"][mask, 0].muons.pt > 26, axis=-1) >= 2, 1.5,
+                                ak.sum(objs["mu_ljs"][mask, 0].muons.pt > 26, axis=-1))
+                       +
+                       ak.where(ak.sum(objs["mu_ljs"][mask, 1].muons.pt > 26, axis=-1) >= 2, 1.5,
+                                ak.sum(objs["mu_ljs"][mask, 1].muons.pt > 26, axis=-1))
+                   )),
+        ],
+        evt_mask=lambda objs: ak.num(objs["mu_ljs"]) >= 2,
+    ),
+
+
+    "dsaMu_dsaMu_dR": h.Histogram(
+        [
+            # dR(subleading gen Mu, leading gen Mu)
+            h.Axis(hist.axis.Regular(50, 0, 1.0, name="genMu_genMu_dR",
+                                     label=r"$\Delta R$(DSA $\mu_0$, DSA $\mu_1$)"),
+                   lambda objs, mask: objs["dsaMuons"][mask, 1].delta_r(
+                       objs["dsaMuons"][mask, 0])),
+        ],
+        evt_mask=lambda objs: ak.num(objs["dsaMuons"]) > 1,
+    ),
+    "dsaMu_dsaMu_invmass": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(200, 0, 1000, name="muon_muon_mass",
+                                     label=r"Invariant Mass (DSA $\mu_{0}$, DSA $\mu_{1}$)"),
+                   lambda objs, mask: objs["dsaMuons"][mask, :2].sum().mass),
+        ],
+        evt_mask=lambda objs: ak.num(objs["dsaMuons"]) > 1,
+    ),
+
+
     # lj
     "lj_n": obj_attr("ljs", "n"),
-    "lj_iso": obj_attr("ljs", "isolation", nbins=50, xmax=1),
+    "lj_iso": obj_attr("ljs", "isolation", nbins=50, xmax=2),
     "egm_lj_n": obj_attr("egm_ljs", "n"),
-    "egm_lj_iso": obj_attr("egm_ljs", "isolation", nbins=50, xmax=1),
+    "egm_lj_iso": obj_attr("egm_ljs", "isolation", nbins=50, xmax=2),
     "mu_lj_n": obj_attr("mu_ljs", "n"),
-    "mu_lj_iso": obj_attr("mu_ljs", "isolation", nbins=50, xmax=1),
+    "mu_lj_iso": obj_attr("mu_ljs", "isolation", nbins=50, xmax=2),
     "lj_pt": obj_attr("ljs", "pt", xmax=700),
+    "lj_e": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 1000, name="lj_e", label="LJ Energy [GeV]"),
+                   lambda objs, mask: objs["ljs"][mask].energy),
+        ],
+    ),
     "lj0_pt": h.Histogram(
         [
             h.Axis(hist.axis.Regular(100, 0, 400, name="lj0_pt",
@@ -742,11 +862,115 @@ hist_defs = {
     "lj_muonN": obj_attr("ljs", "muon_n", xmax=10, nbins=10),
     "lj_dsaMuN": obj_attr("ljs", "dsaMu_n", xmax=10, nbins=10),
     "lj_pfMuN": obj_attr("ljs", "pfMu_n", xmax=10, nbins=10),
+
+    "lj_muon_pt": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 500, name=r"LJ $\mu$ pT (GeV)"),
+                   lambda objs, mask: objs["ljs"].muons.pt),
+        ],
+    ),
+    "lj_pfMuon_pt": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 500, name=r"LJ PF $\mu$ pT (GeV)"),
+                   lambda objs, mask: objs["ljs"].pfMuons.pt),
+        ],
+    ),
+    "lj_dsaMuon_pt": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 500, name=r"LJ DSA $\mu$ pT (GeV)"),
+                   lambda objs, mask: objs["ljs"].dsaMuons.pt),
+        ],
+    ),
+    "lj_electron_pt": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 500, name=r"LJ e pT (GeV)"),
+                   lambda objs, mask: objs["ljs"].electrons.pt),
+        ],
+    ),
+    "lj_photon_pt": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 500, name=r"LJ $\gamma$ pT (GeV)"),
+                   lambda objs, mask: objs["ljs"].photons.pt),
+        ],
+    ),
+    "lj_muon_dxy": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 2, name=r"LJ $\mu$ dxy (cm)"),
+                   lambda objs, mask: abs(objs["ljs"].muons.dxy)),
+        ],
+    ),
+    "lj_pfMuon_dxy": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 2, name=r"LJ PF $\mu$ dxy (cm)"),
+                   lambda objs, mask: abs(objs["ljs"].pfMuons.dxy)),
+        ],
+    ),
+    "lj_dsaMuon_dxy": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 2, name=r"LJ DSA $\mu$ dxy (cm)"),
+                   lambda objs, mask: abs(objs["ljs"].dsaMuons.dxy)),
+        ],
+    ),
+    "lj_dsaMuon_dz": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 80, name=r"LJ DSA $\mu$ dz (cm)"),
+                   lambda objs, mask: abs(objs["ljs"].dsaMuons.dz)),
+        ],
+    ),
+    "lj_electron_dxy": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 2, name=r"LJ e dxy (cm)"),
+                   lambda objs, mask: abs(objs["ljs"].electrons.dxy)),
+        ],
+    ),
     "mu_lj_pt": obj_attr("mu_ljs", "pt", xmax=700),
+    "pfmu_lj_pt": obj_attr("pfmu_ljs", "pt", xmax=1000),
+    "dsamu_lj_pt": obj_attr("dsamu_ljs", "pt", xmax=1000),
+    "mu_lj_e": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 1000, name="lj_e", label="Mu LJ Energy [GeV]"),
+                   lambda objs, mask: objs["mu_ljs"][mask].energy),
+        ],
+    ),
+    "pfmu_lj_e": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 1000, name="lj_e", label="PF Mu LJ Energy [GeV]"),
+                   lambda objs, mask: objs["pfmu_ljs"][mask].energy),
+        ],
+    ),
+    "dsamu_lj_e": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 1000, name="lj_e", label="DSA Mu LJ Energy [GeV]"),
+                   lambda objs, mask: objs["dsamu_ljs"][mask].energy),
+        ],
+    ),
     "mu_lj_muonN": obj_attr("mu_ljs", "muon_n", xmax=10, nbins=10),
     "mu_lj_pfMu_n": obj_attr("mu_ljs", "pfMu_n", xmax=10, nbins=10),
     "mu_lj_dsaMu_n": obj_attr("mu_ljs", "dsaMu_n", xmax=10, nbins=10),
     "egm_lj_pt": obj_attr("egm_ljs", "pt", xmax=700),
+    "electron_lj_pt": obj_attr("electron_ljs", "pt", xmax=1000),
+    "photon_lj_pt": obj_attr("photon_ljs", "pt", xmax=1000),
+    "egm_lj_e": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 1000, name="lj_e",
+                                     label="EGM LJ Energy [GeV]"),
+                   lambda objs, mask: objs["egm_ljs"][mask].energy),
+        ],
+    ),
+    "electron_lj_e": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 1000, name="lj_e",
+                                     label="Electron LJ Energy [GeV]"),
+                   lambda objs, mask: objs["electron_ljs"][mask].energy),
+        ],
+    ),
+    "photon_lj_e": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 1000, name="lj_e",
+                                     label="Photon LJ Energy [GeV]"),
+                   lambda objs, mask: objs["photon_ljs"][mask].energy),
+        ],
+    ),
     "egm_lj_electronN": obj_attr("egm_ljs", "electron_n", xmax=10, nbins=10),
     "egm_lj_photonN": obj_attr("egm_ljs", "photon_n", xmax=10, nbins=10),
     "egm_lj_electron_pt": h.Histogram(
@@ -980,8 +1204,20 @@ hist_defs = {
     ),
     "mu_lj_dsaMuon_dxy": h.Histogram(
         [
-            h.Axis(hist.axis.Regular(100, 0, 50, name=r"$\mu$- type LJ DSA $\mu$ dxy (cm)"),
+            h.Axis(hist.axis.Regular(100, 0, 100, name=r"$\mu$- type LJ DSA $\mu$ dxy (cm)"),
                    lambda objs, mask: abs(objs["mu_ljs"].dsaMuons.dxy)),
+        ],
+    ),
+    "mu_lj_dsaMuon_dz": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 80, name=r"$\mu$- type LJ DSA $\mu$ dz (cm)"),
+                   lambda objs, mask: abs(objs["mu_ljs"].dsaMuons.dz)),
+        ],
+    ),
+    "mu_lj_dsaMuon_cosAlpha": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, -1, 1, name=r"$\mu$- type LJ DSA $\mu$ cos $\alpha$"),
+                  lambda objs, mask: cosAlpha(objs["mu_ljs"].dsaMuons, axis=2)),
         ],
     ),
     "mu_lj_muon_dxy_lowRange": h.Histogram(
@@ -1633,6 +1869,14 @@ hist_defs = {
                    lambda objs, mask: objs["mu_ljs"].muons.phi),
         ],
     ),
+    "egm_lj_electron_eta_phi": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(50, -3, 3, name="egm_lj_e_eta"),
+                   lambda objs, mask: objs["egm_ljs"].electrons.eta),
+            h.Axis(hist.axis.Regular(50, -1*math.pi, math.pi, name="egm_lj_e_phi"),
+                   lambda objs, mask: objs["egm_ljs"].electrons.phi),
+        ],
+    ),
     "lj_electronPhotonN": h.Histogram(
         [
             h.Axis(hist.axis.Integer(0, 10, name="lj_electronPhotonN"),
@@ -1727,6 +1971,35 @@ hist_defs = {
                    lambda objs, mask: abs(objs["ljs"][mask, 1].eta - objs["ljs"][mask, 0].eta)),
         ],
         evt_mask=lambda objs: ak.num(objs["ljs"]) > 1,
+    ),
+    # gen-matched pair mass: each dark photon paired with ITS OWN nearest LJ
+    # (nearest() maps each genA to its own closest LJ, unlike lj_lj_invmass's
+    # blind top-2-by-pT pick), isolating momentum resolution from the small,
+    # mass-growing chance of a spurious extra LJ outranking the correct one
+    "genA_matched_lj_lj_invmass": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 1200, name="genA_matched_ljlj_mass",
+                                     label=r"Invariant Mass (gen-matched $LJ_{Z_d,0}$, $LJ_{Z_d,1}$)"),
+                   lambda objs, mask: (objs["genAs_toMu"][mask]
+                       .nearest(objs["mu_ljs"][mask], threshold=0.4).sum().mass)),
+        ],
+        evt_mask=lambda objs: (
+            (ak.num(objs["genAs_toMu"]) == 2)
+            & (ak.num(matched(objs["genAs_toMu"], objs["mu_ljs"], 0.4)) == 2)),
+    ),
+    "genA_matched_mulj_egmlj_invmass": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 1200, name="genA_matched_mulj_egmlj_mass",
+                                     label=r"Invariant Mass (gen-matched $\mu$-LJ, $e$-LJ)"),
+                   lambda objs, mask: (
+                       objs["genAs_toMu"][mask].nearest(objs["mu_ljs"][mask], threshold=0.4).sum()
+                       + objs["genAs_toE"][mask].nearest(objs["egm_ljs"][mask], threshold=0.4).sum()
+                   ).mass),
+        ],
+        evt_mask=lambda objs: (
+            (ak.num(objs["genAs_toMu"]) == 1) & (ak.num(objs["genAs_toE"]) == 1)
+            & (ak.num(matched(objs["genAs_toMu"], objs["mu_ljs"], 0.4)) == 1)
+            & (ak.num(matched(objs["genAs_toE"], objs["egm_ljs"], 0.4)) == 1)),
     ),
     "lj_lj_invmass": h.Histogram(
         [
@@ -2082,6 +2355,24 @@ hist_defs = {
         evt_mask=lambda objs: ak.num(objs["ljs"]) > 1,
     ),
     # matchedjet
+    "matched_jet_n": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(10, 0, 10, name="matched_jet", label="Number of Matched Jet"),
+                   lambda objs, mask:  ak.num(ak.drop_none(objs["ljs"].matched_jet.pt))),
+        ],
+    ),
+    "mu_matched_jet_n": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(10, 0, 10, name="mu_matched_jet", label="Number of Mu Matched Jet"),
+                   lambda objs, mask:  ak.num(ak.drop_none(objs["mu_ljs"].matched_jet.pt))),
+        ],
+    ),
+    "egm_matched_jet_n": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(10, 0, 10, name="egm_matched_jet", label="Number of EGM Matched Jet"),
+                   lambda objs, mask:  ak.num(ak.drop_none(objs["egm_ljs"].matched_jet.pt))),
+        ],
+    ),
     "matched_jet_pt": h.Histogram(
         [
             h.Axis(hist.axis.Regular(50, 0, 800, name="matched_jet_pt",
@@ -2129,6 +2420,48 @@ hist_defs = {
             h.Axis(hist.axis.Regular(50, 0, 800, name="photon_matched_jet_pt",
                    label="Photon Matched Jet PT [GeV]"),
                    lambda objs, mask:  objs["photon_ljs"].matched_jet.pt),
+        ],
+    ),
+    "matched_jet_e": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 1000, name="matched_jet_e", label="Matched Jet Energy [GeV]"),
+                   lambda objs, mask:  objs["ljs"].matched_jet.energy),
+        ],
+    ),
+    "mu_matched_jet_e": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 1000, name="mu_matched_jet_e", label="Mu Matched Jet Energy [GeV]"),
+                   lambda objs, mask:  objs["mu_ljs"].matched_jet.energy),
+        ],
+    ),
+    "pfmu_matched_jet_e": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 1000, name="pfmu_matched_jet_e", label="PF Mu Matched Jet Energy [GeV]"),
+                   lambda objs, mask:  objs["pfmu_ljs"].matched_jet.energy),
+        ],
+    ),
+    "dsamu_matched_jet_e": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 1000, name="dsamu_matched_jet_e", label="DSA Mu Matched Jet Energy [GeV]"),
+                   lambda objs, mask:  objs["dsamu_ljs"].matched_jet.energy),
+        ],
+    ),
+    "egm_matched_jet_e": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 1000, name="egm_matched_jet_e", label="EGM Matched Jet Energy [GeV]"),
+                   lambda objs, mask:  objs["egm_ljs"].matched_jet.energy),
+        ],
+    ),
+    "electron_matched_jet_e": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(50, 0, 800, name="electron_matched_jet_e", label="Electron Matched Jet Energy [GeV]"),
+                   lambda objs, mask:  objs["electron_ljs"].matched_jet.energy),
+        ],
+    ),
+    "photon_matched_jet_e": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(50, 0, 800, name="photon_matched_jet_e", label="Photon Matched Jet Energy [GeV]"),
+                   lambda objs, mask:  objs["photon_ljs"].matched_jet.energy),
         ],
     ),
     "matched_jet_lepfraction": h.Histogram(
@@ -2230,6 +2563,125 @@ hist_defs = {
                    lambda objs, mask: objs["photon_ljs"].dR_matched_jet),
         ],
     ),
+    "dpt_matched_jet_lj": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 200, name="dpt_matched_jet_lj",
+                   label="|Matched Jet $p_{T}$ - LJ $p_{T}$|"),
+                   lambda objs, mask: abs(objs["ljs"].matched_jet.pt - objs["ljs"].pt)),
+        ],
+    ),
+    "dpt_matched_jet_lj_large": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 1000, name="dpt_matched_jet_lj",
+                   label="|Matched Jet $p_{T}$ - LJ $p_{T}$|"),
+                   lambda objs, mask: abs(objs["ljs"].matched_jet.pt - objs["ljs"].pt)),
+        ],
+    ),
+    "dpt_mu_matched_jet_lj": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 200, name="dpt_matched_jet_lj",
+                   label="|Mu Matched Jet $p_{T}$ - Mu LJ $p_{T}$|"),
+                   lambda objs, mask: abs(objs["mu_ljs"].matched_jet.pt - objs["mu_ljs"].pt)),
+        ],
+    ),
+    "dpt_mu_matched_jet_lj_large": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 1000, name="dpt_matched_jet_lj",
+                   label="|Mu Matched Jet $p_{T}$ - Mu LJ $p_{T}$|"),
+                   lambda objs, mask: abs(objs["mu_ljs"].matched_jet.pt - objs["mu_ljs"].pt)),
+        ],
+    ),
+    "dpt_pfmu_matched_jet_lj_large": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 1000, name="dpt_matched_jet_lj",
+                   label="|PF Mu Matched Jet $p_{T}$ - PF Mu LJ $p_{T}$|"),
+                   lambda objs, mask: abs(objs["pfmu_ljs"].matched_jet.pt - objs["pfmu_ljs"].pt)),
+        ],
+    ),
+    "dpt_dsamu_matched_jet_lj_large": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 1000, name="dpt_matched_jet_lj",
+                   label="|DSA Mu Matched Jet $p_{T}$ - DSA Mu LJ $p_{T}$|"),
+                   lambda objs, mask: abs(objs["dsamu_ljs"].matched_jet.pt - objs["dsamu_ljs"].pt)),
+        ],
+    ),
+    "dpt_egm_matched_jet_lj": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 200, name="dpt_matched_jet_lj",
+                   label="|EGM Matched Jet $p_{T}$ - EGM LJ $p_{T}$|"),
+                   lambda objs, mask: abs(objs["egm_ljs"].matched_jet.pt - objs["egm_ljs"].pt)),
+        ],
+    ),
+    "dpt_egm_matched_jet_lj_large": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 1000, name="dpt_matched_jet_lj",
+                   label="|EGM Matched Jet $p_{T}$ - EGM LJ $p_{T}$|"),
+                   lambda objs, mask: abs(objs["egm_ljs"].matched_jet.pt - objs["egm_ljs"].pt)),
+        ],
+    ),
+    "dpt_electron_matched_jet_lj_large": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 1000, name="dpt_matched_jet_lj",
+                   label="|Electron Matched Jet $p_{T}$ - Electron LJ $p_{T}$|"),
+                   lambda objs, mask: abs(objs["electron_ljs"].matched_jet.pt - objs["electron_ljs"].pt)),
+        ],
+    ),
+    "dpt_photon_matched_jet_lj_large": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 1000, name="dpt_matched_jet_lj",
+                   label="|Photon Matched Jet $p_{T}$ - Photon LJ $p_{T}$|"),
+                   lambda objs, mask: abs(objs["photon_ljs"].matched_jet.pt - objs["photon_ljs"].pt)),
+        ],
+    ),
+    "mj_lj_Eratio": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 2, name="mj_lj_Eratio",
+                   label=r"$E_{Matched Jet} / E_{LJ}$"),
+                   lambda objs, mask:  (objs["ljs"].matched_jet.energy / objs["ljs"].energy)),
+        ],
+    ),
+    "mu_mj_lj_Eratio": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 2, name="mu_mj_lj_Eratio",
+                   label=r"Mu-type $E_{Matched Jet} / E_{LJ}$"),
+                   lambda objs, mask:  (objs["mu_ljs"].matched_jet.energy / objs["mu_ljs"].energy)),
+        ],
+    ),
+    "pfmu_mj_lj_Eratio": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 2, name="pfmu_mj_lj_Eratio",
+                   label=r"PF Mu-type $E_{Matched Jet} / E_{LJ}$"),
+                   lambda objs, mask:  (objs["pfmu_ljs"].matched_jet.energy / objs["pfmu_ljs"].energy)),
+        ],
+    ),
+    "dsamu_mj_lj_Eratio": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 2, name="dsamu_mj_lj_Eratio",
+                   label=r"DSA Mu-type $E_{Matched Jet} / E_{LJ}$"),
+                   lambda objs, mask:  (objs["dsamu_ljs"].matched_jet.energy / objs["dsamu_ljs"].energy)),
+        ],
+    ),
+    "egm_mj_lj_Eratio": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 2, name="egm_mj_lj_Eratio",
+                   label=r"EGM-type $E_{Matched Jet} / E_{LJ}$"),
+                   lambda objs, mask:  (objs["egm_ljs"].matched_jet.energy / objs["egm_ljs"].energy)),
+        ],
+    ),
+    "electron_mj_lj_Eratio": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 2, name="electron_mj_lj_Eratio",
+                   label=r"Electron-type $E_{Matched Jet} / E_{LJ}$"),
+                   lambda objs, mask:  (objs["electron_ljs"].matched_jet.energy / objs["electron_ljs"].energy)),
+        ],
+    ),
+    "photon_mj_lj_Eratio": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 2, name="photon_mj_lj_Eratio",
+                   label=r"Photon-type $E_{Matched Jet} / E_{LJ}$"),
+                   lambda objs, mask:  (objs["photon_ljs"].matched_jet.energy / objs["photon_ljs"].energy)),
+        ],
+    ),
     # lj isolation
     "lj_isolation": h.Histogram(
         [
@@ -2245,13 +2697,6 @@ hist_defs = {
                    lambda objs, mask:  objs["ljs"].isolation),
         ],
     ),
-    "mu_lj_isolation": h.Histogram(
-        [
-            h.Axis(hist.axis.Regular(50, 0, 2, name="mu_lj_isolation",
-                   label="Mu-LJ Isolation"),
-                   lambda objs, mask:  objs["mu_ljs"].isolation),
-        ],
-    ),
     "mu_lj_isolation_zoom": h.Histogram(
         [
             h.Axis(hist.axis.Regular(50, 0, 0.2, name="mu_lj_isolation",
@@ -2259,7 +2704,7 @@ hist_defs = {
                    lambda objs, mask:  objs["mu_ljs"].isolation),
         ],
     ),
-    "pfmu_lj_isolation": h.Histogram(
+    "pfmu_lj_iso": h.Histogram(
         [
             h.Axis(hist.axis.Regular(50, 0, 2, name="pfmu_lj_isolation",
                    label="PF Mu-LJ Isolation"),
@@ -2273,7 +2718,7 @@ hist_defs = {
                    lambda objs, mask:  objs["pfmu_ljs"].isolation),
         ],
     ),
-    "dsamu_lj_isolation": h.Histogram(
+    "dsamu_lj_iso": h.Histogram(
         [
             h.Axis(hist.axis.Regular(50, 0, 2, name="dsamu_lj_isolation",
                    label="DSA Mu-LJ Isolation"),
@@ -2287,13 +2732,6 @@ hist_defs = {
                    lambda objs, mask:  objs["dsamu_ljs"].isolation),
         ],
     ),
-    "egm_lj_isolation": h.Histogram(
-        [
-            h.Axis(hist.axis.Regular(50, 0, 2, name="egm_lj_isolation",
-                   label="EGM-LJ Isolation"),
-                   lambda objs, mask:  objs["egm_ljs"].isolation),
-        ],
-    ),
     "egm_lj_isolation_zoom": h.Histogram(
         [
             h.Axis(hist.axis.Regular(50, 0, 0.2, name="egm_lj_isolation",
@@ -2301,7 +2739,7 @@ hist_defs = {
                    lambda objs, mask:  objs["egm_ljs"].isolation),
         ],
     ),
-    "electron_lj_isolation": h.Histogram(
+    "electron_lj_iso": h.Histogram(
         [
             h.Axis(hist.axis.Regular(50, 0, 2, name="electron_lj_isolation",
                    label="Electron-LJ Isolation"),
@@ -2315,7 +2753,7 @@ hist_defs = {
                    lambda objs, mask:  objs["electron_ljs"].isolation),
         ],
     ),
-    "photon_lj_isolation": h.Histogram(
+    "photon_lj_iso": h.Histogram(
         [
             h.Axis(hist.axis.Regular(50, 0, 2, name="photon_lj_isolation",
                    label="Photon-LJ Isolation"),
@@ -2508,7 +2946,7 @@ hist_defs = {
         [
             h.Axis(hist.axis.Regular(100, 0, 0.1, name="genE0_dxy",
                                      label=r"Leading gen-level electron $d_{xy}$ [cm]"),
-                   lambda objs, mask: abs(dxy(objs["genEs"][mask, 0], ref=objs["pvs"]))),
+                   lambda objs, mask: abs(dxy(objs["genEs"][mask, 0], ref=objs["pvs"][mask]))),
         ],
         evt_mask=lambda objs: ak.num(objs["genEs"]) > 0,
     ),
@@ -2516,7 +2954,7 @@ hist_defs = {
         [
             h.Axis(hist.axis.Regular(100, 0, 0.01, name="genE0_dxy",
                                      label=r"Leading gen-level electron $d_{xy}$ [cm]"),
-                   lambda objs, mask: abs(dxy(objs["genEs"][mask, 0], ref=objs["pvs"]))),
+                   lambda objs, mask: abs(dxy(objs["genEs"][mask, 0], ref=objs["pvs"][mask]))),
         ],
         evt_mask=lambda objs: ak.num(objs["genEs"]) > 0,
     ),
@@ -2540,7 +2978,7 @@ hist_defs = {
         [
             h.Axis(hist.axis.Regular(100, 0, 0.1, name="genE1_dxy",
                                      label=r"Sub-leading gen-level electron $d_{xy}$ [cm]"),
-                   lambda objs, mask: abs(dxy(objs["genEs"][mask, 1], ref=objs["pvs"]))),
+                   lambda objs, mask: abs(dxy(objs["genEs"][mask, 1], ref=objs["pvs"][mask]))),
         ],
         evt_mask=lambda objs: ak.num(objs["genEs"]) > 1,
     ),
@@ -2548,7 +2986,7 @@ hist_defs = {
         [
             h.Axis(hist.axis.Regular(100, 0, 0.01, name="genE1_dxy",
                                      label=r"Sub-leading gen-level electron $d_{xy}$ [cm]"),
-                   lambda objs, mask: abs(dxy(objs["genEs"][mask, 1], ref=objs["pvs"]))),
+                   lambda objs, mask: abs(dxy(objs["genEs"][mask, 1], ref=objs["pvs"][mask]))),
         ],
         evt_mask=lambda objs: ak.num(objs["genEs"]) > 1,
     ),
@@ -2633,11 +3071,52 @@ hist_defs = {
         ],
         evt_mask=lambda objs: ak.num(objs["genEs"]) > 1,
     ),
+    "genE_leading_vs_subleading_vx": h.Histogram(
+        [
+
+            h.Axis(hist.axis.Regular(100, -500, 500, name="leading_vx", label=r"$v_x(e_0^{gen})$"),
+                  lambda objs, mask: objs["genEs"][mask, 0].vx),
+            h.Axis(hist.axis.Regular(100, -500, 500, name="subleading_vx", label=r"$v_x(e_1^{gen})$"),
+                  lambda objs, mask: objs["genEs"][mask, 1].vx),
+        ],
+        evt_mask=lambda objs: ak.num(objs["genEs"]) > 1,
+    ),
+    "genE_leading_vs_subleading_vy": h.Histogram(
+        [
+
+            h.Axis(hist.axis.Regular(100, -500, 500, name="leading_vy", label=r"$v_y(e_0^{gen})$"),
+                  lambda objs, mask: objs["genEs"][mask, 0].vy),
+            h.Axis(hist.axis.Regular(100, -500, 500, name="subleading_vy", label=r"$v_y(e_1^{gen})$"),
+                  lambda objs, mask: objs["genEs"][mask, 1].vy),
+        ],
+        evt_mask=lambda objs: ak.num(objs["genEs"]) > 1,
+    ),
+    "genE_leading_vs_subleading_vz": h.Histogram(
+        [
+
+            h.Axis(hist.axis.Regular(100, -500, 500, name="leading_vz", label=r"$v_z(e_0^{gen})$"),
+                  lambda objs, mask: objs["genEs"][mask, 0].vz),
+            h.Axis(hist.axis.Regular(100, -500, 500, name="subleading_vz", label=r"$v_z(e_1^{gen})$"),
+                  lambda objs, mask: objs["genEs"][mask, 1].vz),
+        ],
+        evt_mask=lambda objs: ak.num(objs["genEs"]) > 1,
+    ),
+    "genE_leading_vs_subleading_dxy": h.Histogram(
+        [
+
+            h.Axis(hist.axis.Regular(100, -500, 500, name="leading_dxy", label=r"$d_{xy}(e_0^{gen})$"),
+                  lambda objs, mask: objs["genEs"][mask, 0].dxy),
+            h.Axis(hist.axis.Regular(100, -500, 500, name="subleading_dxy", label=r"$d_{xy}(e_1^{gen})$"),
+                  lambda objs, mask: objs["genEs"][mask, 1].dxy),
+        ],
+        evt_mask=lambda objs: ak.num(objs["genEs"]) > 1,
+    ),
     # genmuon
     "genMu_n": obj_attr("genMus", "n"),
     "genMu_pt": obj_attr("genMus", "pt"),
     "genMu_pt_highRange": obj_attr("genMus", "pt", xmax=700),
     "genMu_dxy": obj_attr("genMus", "dxy", absval=True, xmax=10, nbins=100),
+    "genMu_vz": obj_attr("genMus", "vz", absval=True, xmax=100, nbins=100),
     "genMu_dxy_lowRange": obj_attr("genMus", "dxy", absval=True, xmax=1, nbins=100),
     "genMu_dxy_XLowRange": obj_attr("genMus", "dxy", absval=True, xmax=0.1, nbins=100),
     "genMu_dxy_XXLowRange": obj_attr("genMus", "dxy", absval=True, xmax=0.01, nbins=100),
@@ -2676,7 +3155,8 @@ hist_defs = {
                                      label="genMu_matched_muon_dxy"),
                    lambda objs, mask: abs(dxy(objs["muons"].matched_gen[objs["muons"].matched_gen.status == 1], ref=objs["pvs"]))),
         ],
-    ),"genMu_matched_lj_muon_dxy":  h.Histogram(
+    ),
+    "genMu_matched_lj_muon_dxy":  h.Histogram(
         [
             h.Axis(hist.axis.Regular(100, 0, 0.1, name="genMu_matched_lj_muon_dxy",
                                      label="genMu_matched_lj_muon_dxy"),
@@ -2716,7 +3196,7 @@ hist_defs = {
         [
             h.Axis(hist.axis.Regular(100, 0, 0.1, name="genMu0_dxy",
                                      label=r"Leading gen-level muon $d_{xy}$ [cm]"),
-                   lambda objs, mask: abs(dxy(objs["genMus"][mask, 0], ref=objs["pvs"]))),
+                   lambda objs, mask: abs(dxy(objs["genMus"][mask, 0], ref=objs["pvs"][mask]))),
         ],
         evt_mask=lambda objs: ak.num(objs["genMus"]) > 0,
     ),
@@ -2724,7 +3204,7 @@ hist_defs = {
         [
             h.Axis(hist.axis.Regular(100, 0, 0.01, name="genMu0_dxy",
                                      label=r"Leading gen-level muon $d_{xy}$ [cm]"),
-                   lambda objs, mask: abs(dxy(objs["genMus"][mask, 0], ref=objs["pvs"]))),
+                   lambda objs, mask: abs(dxy(objs["genMus"][mask, 0], ref=objs["pvs"][mask]))),
         ],
         evt_mask=lambda objs: ak.num(objs["genMus"]) > 0,
     ),
@@ -2748,7 +3228,7 @@ hist_defs = {
         [
             h.Axis(hist.axis.Regular(100, 0, 0.1, name="genMu1_dxy",
                                      label=r"Sub-leading gen-level muon $d_{xy}$ [cm]"),
-                   lambda objs, mask: abs(dxy(objs["genMus"][mask, 1], ref=objs["pvs"]))),
+                   lambda objs, mask: abs(dxy(objs["genMus"][mask, 1], ref=objs["pvs"][mask]))),
         ],
         evt_mask=lambda objs: ak.num(objs["genMus"]) > 1,
     ),
@@ -2756,7 +3236,7 @@ hist_defs = {
         [
             h.Axis(hist.axis.Regular(100, 0, 0.01, name="genMu1_dxy",
                                      label=r"Sub-leading gen-level muon $d_{xy}$ [cm]"),
-                   lambda objs, mask: abs(dxy(objs["genMus"][mask, 1], ref=objs["pvs"]))),
+                   lambda objs, mask: abs(dxy(objs["genMus"][mask, 1], ref=objs["pvs"][mask]))),
         ],
         evt_mask=lambda objs: ak.num(objs["genMus"]) > 1,
     ),
@@ -2836,12 +3316,192 @@ hist_defs = {
         ],
         evt_mask=lambda objs: ak.num(objs["genMus"]) > 1,
     ),
+    "genMu_leading_vs_subleading_phi": h.Histogram(
+        [
+
+            h.Axis(hist.axis.Regular(50, -7, 7, name="leading_Phi",label=r"$\phi(\mu_0^{gen})$"),
+                  lambda objs, mask: objs["genMus"][mask, 0].phi),
+            h.Axis(hist.axis.Regular(50, -7, 7, name="subleading_Phi",label=r"$\phi(\mu_1^{gen})$"),
+                  lambda objs, mask: objs["genMus"][mask, 1].phi),
+        ],
+        evt_mask=lambda objs: ak.num(objs["genMus"]) > 1,
+    ),
+    "genMu_leading_vs_subleading_eta": h.Histogram(
+        [
+
+            h.Axis(hist.axis.Regular(50, -7, 7, name="leading_Eta",label=r"$\eta(\mu_0^{gen})$"),
+                  lambda objs, mask: objs["genMus"][mask, 0].eta),
+            h.Axis(hist.axis.Regular(50, -7, 7, name="subleading_Eta",label=r"$\eta(\mu_1^{gen})$"),
+                  lambda objs, mask: objs["genMus"][mask, 1].eta),
+        ],
+        evt_mask=lambda objs: ak.num(objs["genMus"]) > 1,
+    ),
+    "genMu_leading_vs_subleading_vx": h.Histogram(
+        [
+
+            h.Axis(hist.axis.Regular(100, -500, 500, name="leading_vx", label=r"$v_x(\mu_0^{gen})$"),
+                  lambda objs, mask: objs["genMus"][mask, 0].vx),
+            h.Axis(hist.axis.Regular(100, -500, 500, name="subleading_vx", label=r"$v_x(\mu_1^{gen})$"),
+                  lambda objs, mask: objs["genMus"][mask, 1].vx),
+        ],
+        evt_mask=lambda objs: ak.num(objs["genMus"]) > 1,
+    ),
+    "genMu_leading_vs_subleading_vy": h.Histogram(
+        [
+
+            h.Axis(hist.axis.Regular(100, -500, 500, name="leading_vy", label=r"$v_y(\mu_0^{gen})$"),
+                  lambda objs, mask: objs["genMus"][mask, 0].vy),
+            h.Axis(hist.axis.Regular(100, -500, 500, name="subleading_vy", label=r"$v_y(\mu_1^{gen})$"),
+                  lambda objs, mask: objs["genMus"][mask, 1].vy),
+        ],
+        evt_mask=lambda objs: ak.num(objs["genMus"]) > 1,
+    ),
+    "genMu_leading_vs_subleading_vz": h.Histogram(
+        [
+
+            h.Axis(hist.axis.Regular(100, -500, 500, name="leading_vz", label=r"$v_z(\mu_0^{gen})$"),
+                  lambda objs, mask: objs["genMus"][mask, 0].vz),
+            h.Axis(hist.axis.Regular(100, -500, 500, name="subleading_vz", label=r"$v_z(\mu_1^{gen})$"),
+                  lambda objs, mask: objs["genMus"][mask, 1].vz),
+        ],
+        evt_mask=lambda objs: ak.num(objs["genMus"]) > 1,
+    ),
+    "genMu_leading_vs_subleading_dxy": h.Histogram(
+        [
+
+            h.Axis(hist.axis.Regular(100, -500, 500, name="leading_dxy", label=r"$d_{xy}(\mu_0^{gen})$"),
+                  lambda objs, mask: objs["genMus"][mask, 0].dxy),
+            h.Axis(hist.axis.Regular(100, -500, 500, name="subleading_dxy", label=r"$d_{xy}(\mu_1^{gen})$"),
+                  lambda objs, mask: objs["genMus"][mask, 1].dxy),
+        ],
+        evt_mask=lambda objs: ak.num(objs["genMus"]) > 1,
+    ),
     "genMu_genMu_pt": h.Histogram(
         [
             h.Axis(hist.axis.Regular(100, 0, 200, name="genMu_genMu_pt"),
                    lambda objs, mask: objs["genMus"][mask, :2].sum().pt),
         ],
         evt_mask=lambda objs: ak.num(objs["genMus"]) > 1,
+    ),
+    # per-dark-photon daughter-pair opening angle (collimation)
+    "genA_toMu_daughters_dR": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 1.0, name="genA_toMu_daughters_dR",
+                                     label=r"$\Delta R(\mu, \mu)$ from same $Z_d$"),
+                   lambda objs, mask: daughters_dR(objs, mask, "genAs_toMu")),
+        ],
+    ),
+    "genA_toMu_daughters_dR_logx": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(80, 1e-4, 1.0, name="genA_toMu_daughters_dR_logx",
+                                     label=r"$\Delta R(\mu, \mu)$ from same $Z_d$",
+                                     transform=hist.axis.transform.log),
+                   lambda objs, mask: daughters_dR(objs, mask, "genAs_toMu")),
+        ],
+    ),
+    "genA_toMu_daughters_dR_vs_pt": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(60, 5, 1000, name="genA_toMu_pt",
+                                     label=r"$Z_d \rightarrow \mu\mu$ $p_{T}$ [GeV]",
+                                     transform=hist.axis.transform.log),
+                   lambda objs, mask: decayed_daughter_pairs(objs, mask, "genAs_toMu").pt),
+            h.Axis(hist.axis.Regular(60, 1e-4, 1.0, name="genA_toMu_daughters_dR",
+                                     label=r"$\Delta R(\mu, \mu)$ from same $Z_d$",
+                                     transform=hist.axis.transform.log),
+                   lambda objs, mask: daughters_dR(objs, mask, "genAs_toMu")),
+        ],
+    ),
+    # displacement against collimation, per decayed dark photon: both axes are
+    # filled from the same decayed_daughter_pairs selection, so an entry is one
+    # dark photon and the pair of axes is a genuine joint distribution
+    "genA_toMu_lxy_vs_daughters_dR": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(50, 0, 500, name="genA_toMu_lxy",
+                                     label=r"$Z_d \rightarrow \mu\mu$ $l_{xy}$ [cm]"),
+                   lambda objs, mask: lxy(decayed_daughter_pairs(objs, mask, "genAs_toMu"))),
+            h.Axis(hist.axis.Regular(48, 1e-4, 1.0, name="genA_toMu_daughters_dR",
+                                     label=r"$\Delta R(\mu, \mu)$ from same $Z_d$",
+                                     transform=hist.axis.transform.log),
+                   lambda objs, mask: daughters_dR(objs, mask, "genAs_toMu")),
+        ],
+    ),
+    "genA_toE_daughters_dR": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 1.0, name="genA_toE_daughters_dR",
+                                     label=r"$\Delta R(e, e)$ from same $Z_d$"),
+                   lambda objs, mask: daughters_dR(objs, mask, "genAs_toE")),
+        ],
+    ),
+    "genA_toE_daughters_dR_logx": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(80, 1e-4, 1.0, name="genA_toE_daughters_dR_logx",
+                                     label=r"$\Delta R(e, e)$ from same $Z_d$",
+                                     transform=hist.axis.transform.log),
+                   lambda objs, mask: daughters_dR(objs, mask, "genAs_toE")),
+        ],
+    ),
+    "genA_toE_daughters_dR_vs_pt": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(60, 5, 1000, name="genA_toE_pt",
+                                     label=r"$Z_d \rightarrow ee$ $p_{T}$ [GeV]",
+                                     transform=hist.axis.transform.log),
+                   lambda objs, mask: decayed_daughter_pairs(objs, mask, "genAs_toE").pt),
+            h.Axis(hist.axis.Regular(60, 1e-4, 1.0, name="genA_toE_daughters_dR",
+                                     label=r"$\Delta R(e, e)$ from same $Z_d$",
+                                     transform=hist.axis.transform.log),
+                   lambda objs, mask: daughters_dR(objs, mask, "genAs_toE")),
+        ],
+    ),
+    # invariant mass of the visible (status-1) signal final state
+    "gen4Mu_invmass": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(120, 0, 1200, name="gen4Mu_invmass",
+                                     label=r"$m(4\mu)$ [GeV]"),
+                   lambda objs, mask: withMass(objs["genMus"][mask, :4], 0.105658).sum().mass),
+        ],
+        evt_mask=lambda objs: ak.num(objs["genMus"]) > 3,
+    ),
+    "gen2Mu2E_invmass": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(120, 0, 1200, name="gen2Mu2E_invmass",
+                                     label=r"$m(2\mu 2e)$ [GeV]"),
+                   lambda objs, mask: (withMass(objs["genMus"][mask, :2], 0.105658).sum()
+                                       + withMass(objs["genEs"][mask, :2], 0.000511).sum()).mass),
+        ],
+        evt_mask=lambda objs: (ak.num(objs["genMus"]) > 1) & (ak.num(objs["genEs"]) > 1),
+    ),
+    # leading/subleading reco muon pT (trigger-threshold context)
+    "muon0_pt": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 100, name="muon0_pt",
+                                     label=r"Leading PF muon $p_{T}$ [GeV]"),
+                   lambda objs, mask: objs["muons"][mask, 0].pt),
+        ],
+        evt_mask=lambda objs: ak.num(objs["muons"]) > 0,
+    ),
+    "muon1_pt": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 100, name="muon1_pt",
+                                     label=r"Sub-leading PF muon $p_{T}$ [GeV]"),
+                   lambda objs, mask: objs["muons"][mask, 1].pt),
+        ],
+        evt_mask=lambda objs: ak.num(objs["muons"]) > 1,
+    ),
+    "dsaMuon0_pt": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 100, name="dsaMuon0_pt",
+                                     label=r"Leading DSA muon $p_{T}$ [GeV]"),
+                   lambda objs, mask: objs["dsaMuons"][mask, 0].pt),
+        ],
+        evt_mask=lambda objs: ak.num(objs["dsaMuons"]) > 0,
+    ),
+    "dsaMuon1_pt": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 100, name="dsaMuon1_pt",
+                                     label=r"Sub-leading DSA muon $p_{T}$ [GeV]"),
+                   lambda objs, mask: objs["dsaMuons"][mask, 1].pt),
+        ],
+        evt_mask=lambda objs: ak.num(objs["dsaMuons"]) > 1,
     ),
     #dsamuon-genAs_toMu
     "dsamuon_absd0_genAs_toMu_lxy": h.Histogram(
@@ -3055,6 +3715,30 @@ hist_defs = {
     ),
     "genAs_lxy": obj_attr("genAs", "lxy", xmax=500),
     "genAs_lxy_lowRange": obj_attr("genAs", "lxy", xmax=10),
+    "genAs_lxyz": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(240, 1e-7, 1e5, name="genAs_lxyz",
+                                     label=r"$Z_d$ $L_{xyz}$ (cm)",
+                                     transform=hist.axis.transform.log),
+                   lambda objs, mask: lxyz(objs["genAs"])),
+        ],
+    ),
+    "genAs_lxyz_proper": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(300, 1e-7, 1e3, name="genAs_lxyz_proper",
+                                     label=r"$Z_d$ proper $L_{xyz}/\beta\gamma$ (cm)",
+                                     transform=hist.axis.transform.log),
+                   lambda objs, mask: lxyz_proper(objs["genAs"])),
+        ],
+    ),
+    "genAs_betagamma": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(120, 1e0, 1e4, name="genAs_betagamma",
+                                     label=r"$Z_d$ $\beta\gamma$",
+                                     transform=hist.axis.transform.log),
+                   lambda objs, mask: betagamma(objs["genAs"])),
+        ],
+    ),
     "genAs_children_n": h.Histogram(
         [
             h.Axis(hist.axis.Regular(10, 0, 10, name="genAs_children_n"),
@@ -3069,6 +3753,22 @@ hist_defs = {
     ),
     "genAs_toMu_lxy": obj_attr("genAs_toMu", "lxy", xmax=500, nbins=100),
     "genAs_toMu_lxy_lowRange": obj_attr("genAs_toMu", "lxy", xmax=20, nbins=100),
+    "genAs_toMu_lxyz": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(240, 1e-7, 1e5, name="genAs_toMu_lxyz",
+                                     label=r"$Z_d\rightarrow\mu\mu$ $L_{xyz}$ (cm)",
+                                     transform=hist.axis.transform.log),
+                   lambda objs, mask: lxyz(objs["genAs_toMu"])),
+        ],
+    ),
+    "genAs_toMu_lxyz_proper": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(300, 1e-7, 1e3, name="genAs_toMu_lxyz_proper",
+                                     label=r"$Z_d\rightarrow\mu\mu$ proper $L_{xyz}/\beta\gamma$ (cm)",
+                                     transform=hist.axis.transform.log),
+                   lambda objs, mask: lxyz_proper(objs["genAs_toMu"])),
+        ],
+    ),
     "genAs_toMu_pt": obj_attr("genAs_toMu", "pt", xmax=200, nbins=50),
     "genAs_toMu_pt_highRange": obj_attr("genAs_toMu", "pt", xmax=700, nbins=200),
     "genAs_toMu_eta": h.Histogram(
@@ -3080,6 +3780,22 @@ hist_defs = {
     "genAs_toE_lxy": obj_attr("genAs_toE", "lxy", xmax=150, nbins=30),
     "genAs_toE_lxy_highRange": obj_attr("genAs_toE", "lxy", xmax=500),
     "genAs_toE_lxy_lowRange": obj_attr("genAs_toE", "lxy", xmax=20),
+    "genAs_toE_lxyz": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(240, 1e-7, 1e5, name="genAs_toE_lxyz",
+                                     label=r"$Z_d\rightarrow ee$ $L_{xyz}$ (cm)",
+                                     transform=hist.axis.transform.log),
+                   lambda objs, mask: lxyz(objs["genAs_toE"])),
+        ],
+    ),
+    "genAs_toE_lxyz_proper": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(300, 1e-7, 1e3, name="genAs_toE_lxyz_proper",
+                                     label=r"$Z_d\rightarrow ee$ proper $L_{xyz}/\beta\gamma$ (cm)",
+                                     transform=hist.axis.transform.log),
+                   lambda objs, mask: lxyz_proper(objs["genAs_toE"])),
+        ],
+    ),
     "genAs_toE_lxy_midRange": obj_attr("genAs_toE", "lxy", xmin=40, xmax=80),
     "genAs_toE_lxy_ecal": obj_attr("genAs_toE", "lxy", xmin=125, xmax=135),
     "genAs_toE_pt": obj_attr("genAs_toE", "pt", xmax=200, nbins=50),
@@ -3636,6 +4352,13 @@ hist_defs = {
         evt_mask=lambda objs: ((ak.num(matched(objs["muons"], objs["genAs_toMu"], 0.4)) > 0)
                                & (ak.num(matched(objs["muons"], objs["ljs"], 0.4)) > 0)),
     ),
+    "muLj_genA_ptRatio": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 2, name="lj_dp_pt_ratio", label=r"Mu-LJ (near DP) PT / DP PT (to $\mu\mu$)"),
+                   lambda objs, mask: derived_objs["mu_lj_matched_genAs_toMu"](objs, 0.4)[mask].pt / derived_objs["genAs_toMu_matched_muLj"](objs, 0.4)[mask].pt),
+        ],
+        evt_mask=lambda objs: (ak.num(derived_objs["mu_lj_matched_genAs_toMu"](objs, 0.4)) == 1),
+    ),
     # genA - LJ 0.4 matching radius, LJ Reco Lxy / True Lxy
     "genA_muLj_lxyRatio": h.Histogram(
         [
@@ -3903,29 +4626,52 @@ hist_defs = {
     # Bound State Kinematics
     "genBS_n": h.Histogram([
                                h.Axis(hist.axis.Integer(0, 10, name=r"Num BS to $Z_d$"),
-                                      lambda objs, mask: ak.num(objs["genBSs_toA"].pt) 
+                                      lambda objs, mask: ak.num(derived_objs["genBSs_toA"](objs).pt)
                                      ),
                            ],
     ),
-    "genBS_pt":              obj_attr("genBSs_toA", "pt", xmax=1000),
-    "genBS_eta":             obj_attr("genBSs_toA", "eta", nbins=50, xmin=-10, xmax=10),
-    "genBS_phi":             obj_attr("genBSs_toA", "phi"),
-    "genBS_mass":            obj_attr("genBSs_toA", "mass", xmax=1200),
-    "genBS_from_genAs_pt":   obj_attr("genBS_from_genAs", "pt", xmax=1000),
-    "genBS_from_genAs_eta":  obj_attr("genBS_from_genAs", "eta", nbins=50, xmin=-10, xmax=10),
-    "genBS_from_genAs_phi":  obj_attr("genBS_from_genAs", "phi"),
-    "genBS_from_genAs_mass": obj_attr("genBS_from_genAs", "mass", xmax=1200),
+    "genBS_pt": h.Histogram([
+        h.Axis(hist.axis.Regular(100, 0, 1000, name="genBSs_toA_pt", label=r"Gen BS (to $Z_d$) $p_T$ (GeV)"),
+               lambda objs, mask: derived_objs["genBSs_toA"](objs).pt),
+    ]),
+    "genBS_eta": h.Histogram([
+        h.Axis(hist.axis.Regular(50, -10, 10, name="genBSs_toA_eta", label=r"Gen BS (to $Z_d$) $\eta$"),
+               lambda objs, mask: derived_objs["genBSs_toA"](objs).eta),
+    ]),
+    "genBS_phi": h.Histogram([
+        h.Axis(hist.axis.Regular(50, -math.pi, math.pi, name="genBSs_toA_phi", label=r"Gen BS (to $Z_d$) $\phi$"),
+               lambda objs, mask: derived_objs["genBSs_toA"](objs).phi),
+    ]),
+    "genBS_mass": h.Histogram([
+        h.Axis(hist.axis.Regular(100, 0, 1200, name="genBSs_toA_mass", label=r"Gen BS (to $Z_d$) Mass (GeV)"),
+               lambda objs, mask: derived_objs["genBSs_toA"](objs).mass),
+    ]),
+    "genBS_from_genAs_pt": h.Histogram([
+        h.Axis(hist.axis.Regular(100, 0, 1000, name="genBS_from_genAs_pt", label=r"BS (reco from Gen $Z_d$) $p_T$ (GeV)"),
+               lambda objs, mask: derived_objs["genBS_from_genAs"](objs).pt),
+    ]),
+    "genBS_from_genAs_eta": h.Histogram([
+        h.Axis(hist.axis.Regular(50, -10, 10, name="genBS_from_genAs_eta", label=r"BS (reco from Gen $Z_d$) $\eta$"),
+               lambda objs, mask: derived_objs["genBS_from_genAs"](objs).eta),
+    ]),
+    "genBS_from_genAs_phi": h.Histogram([
+        h.Axis(hist.axis.Regular(50, -math.pi, math.pi, name="genBS_from_genAs_phi", label=r"BS (reco from Gen $Z_d$) $\phi$"),
+               lambda objs, mask: derived_objs["genBS_from_genAs"](objs).phi),
+    ]),
+    "genBS_from_genAs_mass": h.Histogram([
+        h.Axis(hist.axis.Regular(100, 0, 1200, name="genBS_from_genAs_mass", label=r"BS (reco from Gen $Z_d$) Mass (GeV)"),
+               lambda objs, mask: derived_objs["genBS_from_genAs"](objs).mass),
+    ]),
     # Dark Photon Kinematics
     "genA_n": h.Histogram([
                                h.Axis(hist.axis.Integer(0, 10, name=r"Num $Z_d$"),
-                                      lambda objs, mask: ak.num(objs["genAs"].pt) 
+                                      lambda objs, mask: ak.num(objs["genAs"].pt)
                                      ),
                            ],
     ),
     "genAs_mass":  obj_attr("genAs", "mass", nbins=100, xmax=10),
     "genAs_eta":   obj_attr("genAs", "eta", nbins=50, xmin=-5, xmax=5),
     "genAs_phi":   obj_attr("genAs", "phi"),
-    "genAs_pt":    obj_attr("genAs", "pt", xmax=1000),
     "genAs_gamma": obj_attr("genAs", "gamma"),
     "genAs_cosTheta_bsFrame": h.Histogram(
         [
@@ -3938,28 +4684,52 @@ hist_defs = {
             h.Axis(hist.axis.Regular(50, -1, 1, name="genAs_cosTheta", label=r"$\cos\theta^*$ (Central BS)"),
                    lambda objs, mask: cos_theta_in_parent_frame(objs, mask, "genAs")),
         ],
-        evt_mask=lambda objs: (ak.num(objs["genBSs_toA"]) > 0) & (abs(objs["genBSs_toA"][:, 0].eta) < 1.0),
+        evt_mask=lambda objs: (ak.num(derived_objs["genBSs_toA"](objs)) > 0) & (abs(derived_objs["genBSs_toA"](objs)[:, 0].eta) < 1.0),
     ),
     "genMus_fromA_n": h.Histogram([
                                h.Axis(hist.axis.Integer(0, 10, name=r"Num Gen $\mu$ (from $Z_d$)"),
-                                      lambda objs, mask: ak.num(objs["genMus_fromA"].pt) 
+                                      lambda objs, mask: ak.num(objs["genMus_fromA"].pt)
                                      ),
                            ],
     ),
     "genEs_fromA_n": h.Histogram([
                                h.Axis(hist.axis.Integer(0, 10, name=r"Num Gen $e$ (from $Z_d$)"),
-                                      lambda objs, mask: ak.num(objs["genEs_fromA"].pt) 
+                                      lambda objs, mask: ak.num(objs["genEs_fromA"].pt)
                                      ),
                            ],
     ),
-    "genA_from_genMus_mass":  obj_attr("genA_from_genMus", "mass", nbins=100, xmax=10),
-    "genA_from_genMus_eta":   obj_attr("genA_from_genMus", "eta", nbins=50, xmin=-5, xmax=5),
-    "genA_from_genMus_phi":   obj_attr("genA_from_genMus", "phi"),
-    "genA_from_genMus_pt":    obj_attr("genA_from_genMus", "pt", xmax=1000),
-    "genA_from_genEs_mass":   obj_attr("genA_from_genEs", "mass", nbins=100, xmax=10),
-    "genA_from_genEs_eta":    obj_attr("genA_from_genEs", "eta", nbins=50, xmin=-5, xmax=5),
-    "genA_from_genEs_phi":    obj_attr("genA_from_genEs", "phi"),
-    "genA_from_genEs_pt":     obj_attr("genA_from_genEs", "pt", xmax=1000),
+    "genA_from_genMus_mass": h.Histogram([
+        h.Axis(hist.axis.Regular(100, 0, 10, name="genA_from_genMus_mass", label=r"genA_from_genMus Mass (GeV)"),
+               lambda objs, mask: derived_objs["genA_from_genMus"](objs).mass),
+    ]),
+    "genA_from_genMus_eta": h.Histogram([
+        h.Axis(hist.axis.Regular(50, -5, 5, name="genA_from_genMus_eta", label=r"genA_from_genMus $\eta$"),
+               lambda objs, mask: derived_objs["genA_from_genMus"](objs).eta),
+    ]),
+    "genA_from_genMus_phi": h.Histogram([
+        h.Axis(hist.axis.Regular(50, -math.pi, math.pi, name="genA_from_genMus_phi", label=r"genA_from_genMus $\phi$"),
+               lambda objs, mask: derived_objs["genA_from_genMus"](objs).phi),
+    ]),
+    "genA_from_genMus_pt": h.Histogram([
+        h.Axis(hist.axis.Regular(100, 0, 1000, name="genA_from_genMus_pt", label=r"genA_from_genMus $p_T$ (GeV)"),
+               lambda objs, mask: derived_objs["genA_from_genMus"](objs).pt),
+    ]),
+    "genA_from_genEs_mass": h.Histogram([
+        h.Axis(hist.axis.Regular(100, 0, 10, name="genA_from_genEs_mass", label=r"genA_from_genEs Mass (GeV)"),
+               lambda objs, mask: derived_objs["genA_from_genEs"](objs).mass),
+    ]),
+    "genA_from_genEs_eta": h.Histogram([
+        h.Axis(hist.axis.Regular(50, -5, 5, name="genA_from_genEs_eta", label=r"genA_from_genEs $\eta$"),
+               lambda objs, mask: derived_objs["genA_from_genEs"](objs).eta),
+    ]),
+    "genA_from_genEs_phi": h.Histogram([
+        h.Axis(hist.axis.Regular(50, -math.pi, math.pi, name="genA_from_genEs_phi", label=r"genA_from_genEs $\phi$"),
+               lambda objs, mask: derived_objs["genA_from_genEs"](objs).phi),
+    ]),
+    "genA_from_genEs_pt": h.Histogram([
+        h.Axis(hist.axis.Regular(100, 0, 1000, name="genA_from_genEs_pt", label=r"genA_from_genEs $p_T$ (GeV)"),
+               lambda objs, mask: derived_objs["genA_from_genEs"](objs).pt),
+    ]),
     # Lepton Kinematics
     "genMus_status":         obj_attr("genMus", "status"),
     "genEs_status":          obj_attr("genEs", "status"),
@@ -3967,9 +4737,19 @@ hist_defs = {
     "genEs_fromA_status":    obj_attr("genEs_fromA", "status"),
     "genMus_fromA_eta":      obj_attr("genMus_fromA", "eta"),
     "genEs_fromA_eta":       obj_attr("genEs_fromA", "eta"),
+    "genMus_fromA_pt":       obj_attr("genMus_fromA", "pt"),
+    "genEs_fromA_pt":        obj_attr("genEs_fromA", "pt"),
+    "genMus_fromA_dxy":            obj_attr("genMus_fromA", "dxy", absval=True, xmax=10, nbins=100),
+    "genMus_fromA_dxy_lowRange":   obj_attr("genMus_fromA", "dxy", absval=True, xmax=1, nbins=100),
+    "genMus_fromA_dxy_XLowRange":  obj_attr("genMus_fromA", "dxy", absval=True, xmax=0.1, nbins=100),
+    "genMus_fromA_dxy_XXLowRange": obj_attr("genMus_fromA", "dxy", absval=True, xmax=0.01, nbins=100),
+    "genEs_fromA_dxy":             obj_attr("genEs_fromA", "dxy", absval=True, xmax=10, nbins=100),
+    "genEs_fromA_dxy_lowRange":    obj_attr("genEs_fromA", "dxy", absval=True, xmax=1, nbins=100),
+    "genEs_fromA_dxy_XLowRange":   obj_attr("genEs_fromA", "dxy", absval=True, xmax=0.1, nbins=100),
+    "genEs_fromA_dxy_XXLowRange":  obj_attr("genEs_fromA", "dxy", absval=True, xmax=0.01, nbins=100),
     "genMu_AFrame_pt": h.Histogram(
         [
-            h.Axis(hist.axis.Regular(100, 0, 3, name="genMu_AFrame_pt", 
+            h.Axis(hist.axis.Regular(100, 0, 3, name="genMu_AFrame_pt",
                                      label=r"Gen $\mu$ $p_T$ in $Z_d$ Frame [GeV]"),
                    lambda objs, mask: pt_in_parent_frame(objs, mask, "genMus_fromA", mass=0.105658)),
         ],
@@ -3977,7 +4757,7 @@ hist_defs = {
     ),
     "genE_AFrame_pt": h.Histogram(
         [
-            h.Axis(hist.axis.Regular(100, 0, 3, name="genE_AFrame_pt", 
+            h.Axis(hist.axis.Regular(100, 0, 3, name="genE_AFrame_pt",
                                      label=r"Gen $e$ $p_T$ in $Z_d$ Frame [GeV]"),
                    lambda objs, mask: pt_in_parent_frame(objs, mask, "genEs_fromA", mass=0.000511)),
         ],
@@ -4029,7 +4809,7 @@ hist_defs = {
         [
             h.Axis(hist.axis.Regular(50, 0, 1, name="cosTheta", label=r"Gen $\mu$ $|\cos\theta^*|$"),
                    lambda objs, mask: abs(cos_theta_in_parent_frame(objs, mask, "genMus_fromA", mass=0.105658))[:, 0]),
-            
+
             h.Axis(hist.axis.Regular(50, 0, 1, name="ptRatio", label=r"Lab Frame Ratio $p_T^{sub} / p_T^{lead}$"),
                    lambda objs, mask: lab_pt_ratio(objs, mask, "genMus_fromA")),
         ],
@@ -4039,11 +4819,808 @@ hist_defs = {
         [
             h.Axis(hist.axis.Regular(50, 0, 1, name="cosTheta", label=r"Gen $e$ $|\cos\theta^*|$"),
                    lambda objs, mask: abs(cos_theta_in_parent_frame(objs, mask, "genEs_fromA", mass=0.000511))[:, 0]),
-            
+
             h.Axis(hist.axis.Regular(50, 0, 1, name="ptRatio", label=r"Lab Frame Ratio $p_T^{sub} / p_T^{lead}$"),
                    lambda objs, mask: lab_pt_ratio(objs, mask, "genEs_fromA")),
         ],
         evt_mask=lambda objs: ak.num(objs["genEs_fromA"]) >= 2,
     ),
-    
+   "muon_bjet_inv_mass": h.Histogram(
+    [
+        h.Axis(
+            hist.axis.Regular(200, 0, 200, name="muon_bjet_inv_mass",
+            label=r"Invariant Mass ($\mu_{0}$, bjet)"),
+            lambda objs, mask: ak.fill_none(
+                (objs["muons"][mask][:, 0]
+                 + objs["muons"][mask][:, 0].nearest(objs["bjets"][mask],
+                                                     threshold=0.4)).mass, np.nan),),
+    ],
+    evt_mask=lambda objs:
+        (ak.num(objs["bjets"]) > 0) &
+        (ak.num(objs["muons"]) > 0),
+),
+   "muon_bjet_min_inv_mass": h.Histogram(
+    [
+        h.Axis(
+            hist.axis.Regular(200, 0, 200, name="muon_bjet_min_inv_mass",label=r"min Invariant Mass ($\mu_{0}$, bjet)"),
+                 lambda objs, mask: ak.min(
+                (objs["muons"][mask][:, 0] + objs["bjets"][mask]).mass, axis=1),),
+    ],
+    evt_mask=lambda objs: (ak.num(objs["bjets"]) > 0) &(ak.num(objs["muons"]) > 0),
+   ),
+    "mu_lj_pfN_dsaN": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(10, 0, 10, name="mu_lj_pfN",
+                                     label=r"mu_lj_pfN"),
+                  lambda objs, mask: objs["mu_ljs"].pfMu_n),
+            h.Axis(hist.axis.Regular(10, 0, 10, name="mu_lj_dsaN",
+                                     label=r" mu_lj_dsaN"),
+                  lambda objs, mask: objs["mu_ljs"].dsaMu_n),
+        ],
+    ),
+    "mu_lj_vxSpread_dsa": obj_attr("mu_ljs", "vxSpread_dsa", xmax=100, nbins=200),
+    "mu_lj_vySpread_dsa": obj_attr("mu_ljs", "vySpread_dsa", xmax=100, nbins=200),
+    "mu_lj_vzSpread_dsa": obj_attr("mu_ljs", "vzSpread_dsa", xmax=100, nbins=200),
+    "mu_lj_dxySpread_dsa": obj_attr("mu_ljs", "dxySpread_dsa", xmax=100, nbins=200),
+    "mu_lj_dzSpread_dsa": obj_attr("mu_ljs", "dzSpread_dsa", xmax=100, nbins=200),
+    "mu_lj_vxySpread_dsa": obj_attr("mu_ljs", "vxySpread_dsa", xmax=100, nbins=200),
+    "mu_lj_vyzSpread_dsa": obj_attr("mu_ljs", "vyzSpread_dsa", xmax=100, nbins=200),
+    "mu_lj_vzxSpread_dsa": obj_attr("mu_ljs", "vzxSpread_dsa", xmax=100, nbins=200),
+    "mu_lj_v3dSpread_dsa": obj_attr("mu_ljs", "v3dSpread_dsa", xmax=100, nbins=200),
+    "mu_lj_vxSpread_pf": obj_attr("mu_ljs", "vxSpread_pf", xmax=50, nbins=100),
+    "mu_lj_vySpread_pf": obj_attr("mu_ljs", "vySpread_pf", xmax=50, nbins=100),
+    "mu_lj_vzSpread_pf": obj_attr("mu_ljs", "vzSpread_pf", xmax=50, nbins=100),
+    "mu_lj_dxySpread_pf": obj_attr("mu_ljs", "dxySpread_pf", xmax=50, nbins=100),
+    "mu_lj_dzSpread_pf": obj_attr("mu_ljs", "dzSpread_pf", xmax=50, nbins=100),
+    "mu_lj_vxySpread_pf": obj_attr("mu_ljs", "vxySpread_pf", xmax=50, nbins=100),
+    "mu_lj_vyzSpread_pf": obj_attr("mu_ljs", "vyzSpread_pf", xmax=50, nbins=100),
+    "mu_lj_vzxSpread_pf": obj_attr("mu_ljs", "vzxSpread_pf", xmax=50, nbins=100),
+    "mu_lj_v3dSpread_pf": obj_attr("mu_ljs", "v3dSpread_pf", xmax=50, nbins=100),
+    "egm_lj_dxySpread_ele": obj_attr("egm_ljs", "dxySpread_ele", xmax=100, nbins=200),
+    "egm_lj_dzSpread_ele": obj_attr("egm_ljs", "dzSpread_ele", xmax=100, nbins=200),
+    "mu_lj_vxSpread_mu": obj_attr("mu_ljs", "vxSpread_mu", xmax=100, nbins=200),
+    "mu_lj_vySpread_mu": obj_attr("mu_ljs", "vySpread_mu", xmax=100, nbins=200),
+    "mu_lj_vzSpread_mu": obj_attr("mu_ljs", "vzSpread_mu", xmax=100, nbins=200),
+    "mu_lj_dxySpread_mu": obj_attr("mu_ljs", "dxySpread_mu", xmax=100, nbins=200),
+    "mu_lj_dzSpread_mu": obj_attr("mu_ljs", "dzSpread_mu", xmax=100, nbins=200),
+    "mu_lj_vxySpread_mu": obj_attr("mu_ljs", "vxySpread_mu", xmax=100, nbins=200),
+    "mu_lj_vyzSpread_mu": obj_attr("mu_ljs", "vyzSpread_mu", xmax=100, nbins=200),
+    "mu_lj_vzxSpread_mu": obj_attr("mu_ljs", "vzxSpread_mu", xmax=100, nbins=200),
+    "mu_lj_v3dSpread_mu": obj_attr("mu_ljs", "v3dSpread_mu", xmax=100, nbins=200),
+    "dsaMu_pfMu_dR_closest": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(200, 0, 1, name="dsaMu_pfMu_dR_closest"),
+                   lambda objs, mask: dR(objs["dsaMuons"], objs["muons"])),
+        ],
+    ),
+    "dsaMu_pfMu_pt_diff": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, -100, 100, name="dsaMu_pfMu_pt_diff"),
+                   lambda objs, mask: objs["dsaMuons"].pt - objs["dsaMuons"].nearest(objs["muons"], threshold=0.1).pt),
+        ],
+    ),
+   "cosAlpha_dsa": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(200, -1, 1, name="cosAlpha_dsa",
+                                     label=r"CosAlpha(DSA $\mu$, DSA $\mu$)"),
+                   lambda objs, mask: cosAlpha(objs["dsaMuons"])),
+        ],
+    ),
+   "cosAlpha_pf": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(200, -1, 1, name="cosAlpha_pf",
+                                     label=r"CosAlpha(PF$\mu$, PF$\mu$)"),
+                   lambda objs, mask: cosAlpha(objs["muons"])),
+        ],
+    ),
+   "cosAlpha_mu": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(200, -1, 1, name="cosAlpha_mu",
+                                     label=r"CosAlpha($\mu$, $\mu$)"),
+                   lambda objs, mask: cosAlpha(objs["allMuons"])),
+        ],
+    ),
+   "min_cosAlpha_mu": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(200, -1, 1, name="min_cosAlpha_mu",
+                                     label=r"Min CosAlpha($\mu$, $\mu$)"),
+                   lambda objs, mask: ak.min(cosAlpha(objs["allMuons"]), axis=1)),
+        ],
+    ),
+   "min_cosAlpha_pf": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(200, -1, 1, name="min_cosAlpha_pf",
+                                     label=r"Min CosAlpha(PF $\mu$, PF $\mu$)"),
+                   lambda objs, mask: ak.min(cosAlpha(objs["dsaMuons"]), axis=1)),
+        ],
+    ),
+   "min_cosAlpha_dsa": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(200, -1, 1, name="min_cosAlpha_dsa",
+                                     label=r"Min CosAlpha(DSA $\mu$, DSA $\mu$)"),
+                   lambda objs, mask: ak.min(cosAlpha(objs["muons"]), axis=1)),
+        ],
+    ),
+    "muon_innerVz":obj_attr("muons", "innerVz"),
+    "muon_innerVy":obj_attr("muons", "innerVy"),
+    "muon_innerVx":obj_attr("muons", "innerVx"),
+    "muon_dz_innerVz": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 30, name="muon_dz",
+                                     label="muon_dz"),
+                  lambda objs, mask:objs["muons"].dz),
+            h.Axis(hist.axis.Regular(100, 0, 30, name="muon_innerVz",
+                                     label="muon_innerVz"),
+                  lambda objs, mask: objs["muons"].innerVz),
+        ],
+    ),
+    "mu_lj_dzVzdiff_pf": obj_attr("mu_ljs", "dzVzdiff_pf", xmax=50, nbins=300),
+    "muon_dz_innerVz_diff": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 50, name="muon_dz_innerVz_diff",
+                                     label="muon_dz_innerVz_diff"),
+                  lambda objs, mask:abs(objs["muons"].dz - objs["muons"].innerVz)),
+        ],
+    ),
+    "muon_Vz_PVz_diff": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 50, name="muon_dz_innerVz_diff",
+                                     label="muon_dz_innerVz_diff"),
+                  lambda objs, mask:abs(objs["muons"].innerVz - objs["pvs"][:, 0].z)),
+        ],
+    ),
+    "muon_dxy_by_dxyErr": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 50, name="muon_dxy_by_dxyErr",
+                                     label=r"PF $\mu$ $d_{xy}/\sigma(d_{xy})$"),
+                  lambda objs, mask:abs(objs["muons"].dxy/objs["muons"].dxyErr)),
+        ],
+    ),
+    "muon_dz_by_dzErr": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 50, name="muon_dz_by_dzErr",
+                                     label=r"PF $\mu$ $d_{z}/\sigma(d_{z})$"),
+                  lambda objs, mask:abs(objs["muons"].dz/objs["muons"].dzErr)),
+        ],
+    ),
+    "muon_ptErr_by_pt": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 1, name="muon_ptErr_by_pt",
+                                     label=r"PF $\mu$ $\sigma(p_{T})/p_{T}$"),
+                  lambda objs, mask:abs(objs["muons"].ptErr/objs["muons"].pt)),
+        ],
+    ),
+   "dsaMu_dsaMu_deltaR_cosmic": h.Histogram(
+       [
+        h.Axis(hist.axis.Regular(200, 0, 6, name="dsaMu_dsaMu_deltaR_cosmic2",
+                         label=r"$\Delta R_{\rm cosmic}$(DSA $\mu$, DSA $\mu$)",),
+            lambda objs, mask: (lambda mu1, mu2: np.sqrt(
+                    (mu1.eta + mu2.eta)**2 +
+                    (np.pi - np.abs(mu1.phi-mu2.phi))**2))(*ak.unzip(get_pairs(objs["dsaMuons"])))
+        ),
+     ],
+    ),
+   "muon_muon_deltaR_cosmic": h.Histogram(
+       [
+        h.Axis(hist.axis.Regular(200, 0, 6, name="muon_muon_deltaR_cosmic",
+                         label=r"$\Delta R_{\rm cosmic}$(PF $\mu$, PF $\mu$)",),
+            lambda objs, mask: (lambda mu1, mu2: np.sqrt(
+                    (mu1.eta + mu2.eta)**2 +
+                    (np.pi - np.abs(mu1.phi-mu2.phi))**2))(*ak.unzip(get_pairs(objs["muons"])))
+        ),
+     ],
+    ),
+
+   "Allmuon_Allmuon_deltaR_cosmic": h.Histogram(
+       [
+        h.Axis(hist.axis.Regular(200, 0, 6, name="Allmuon_Allmuon_deltaR_cosmic",
+                         label=r"$\Delta R_{\rm cosmic}$($\mu$, $\mu$)",),
+            lambda objs, mask: (lambda mu1, mu2: np.sqrt(
+                    (mu1.eta + mu2.eta)**2 +
+                    (np.pi - np.abs(mu1.phi-mu2.phi))**2))(*ak.unzip(get_pairs(objs["allMuons"])))
+        ),
+     ],
+    ),
+    "mu_lj_pfMu_vzSpread_dzSpread": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 20, name="mu_lj_pfMu_vzSpread",
+                                     label="mu_lj_pfMu_vzSpread"),
+                  lambda objs, mask:objs["mu_ljs"].vzSpread_pf),
+            h.Axis(hist.axis.Regular(100, 0, 20, name="mu_lj_pfMu_dzSpread",
+                                     label="mu_lj_pfMu_dzSpread"),
+                  lambda objs, mask: objs["mu_ljs"].dzSpread_pf),
+        ],
+    ),
+    "N_dsa_pairs": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(10, 0, 10, name="N_back_to_back_dsa",
+                                     label=r"N DSA $\mu$ pairs"),
+                   lambda objs, mask: ak.num(get_pairs(objs["dsaMuons"]))),
+        ],
+    ),
+    "N_back_to_back_dsa": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(10, 0, 10, name="N_back_to_back_dsa",
+                                     label=r"N cos (DSA $\mu$, DSA $\mu$) <= -0.95 "),
+                   lambda objs, mask: ak.num(derived_objs["back_to_back_dsa_pairs"](objs))),
+        ],
+    ),
+    "N_parallel_dsa": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(10, 0, 10, name="N_parallel_dsa",
+                                     label=r"N cos (DSA $\mu$, DSA $\mu$) >= 0.95 "),
+                   lambda objs, mask: ak.num(derived_objs["parallel_dsa_pairs"](objs))),
+        ],
+    ),
+    "N_back_to_back_N_parellel_dsa": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(10, 0, 10, name="N_back_to_back_dsa",
+                                     label=r"N cos (DSA $\mu$, DSA $\mu$) <= -0.95 "),
+                   lambda objs, mask: (lambda v1, v2: ak.sum(np.cos(v1.deltaangle(v2)) <= -0.95, axis=1))
+                                  (*ak.unzip(get_pairs(objs["dsaMuons"])))),
+            h.Axis(hist.axis.Regular(10, 0, 10, name="N_parallel_dsa",
+                                     label=r"N cos (DSA $\mu$, DSA $\mu$) >= 0.95 "),
+                   lambda objs, mask: (lambda v1, v2: ak.sum(np.cos(v1.deltaangle(v2)) >= 0.95, axis=1))
+                                  (*ak.unzip(get_pairs(objs["dsaMuons"])))),
+        ],
+    ),
+    "dsa_pair_3d_distance": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(500, 0, 500, name="dsa_pair_3d_distance",
+                                     label=r" DSA-DSA 3D Distance "),
+                  lambda objs, mask: (lambda v1, v2: np.sqrt((v1.vx - v2.vx)**2 +
+                                                                        (v1.vy - v2.vy)**2 +(v1.vz - v2.vz)**2))
+                                                        (*ak.unzip(get_pairs(objs["dsaMuons"]))))
+        ],
+    ),
+    "back_to_back_dsa_pair_3d_distance": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(500, 0, 500, name="back_to_back_dsa_pair_3d_distance",
+                                     label=r"back to back DSA-DSA 3D Distance "),
+                  lambda objs, mask: (lambda v1, v2: np.sqrt((v1.vx - v2.vx)**2 +
+                                                                        (v1.vy - v2.vy)**2 +(v1.vz - v2.vz)**2))
+                                                        (*ak.unzip(derived_objs["back_to_back_dsa_pairs"](objs))))
+        ],
+    ),
+    "parallel_dsa_pair_3d_distance": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(500, 0, 500, name="back_to_back_dsa_pair_3d_distance",
+                                     label=r"back to back DSA-DSA 3D Distance "),
+                  lambda objs, mask: (lambda v1, v2: np.sqrt((v1.vx - v2.vx)**2 +
+                                                                        (v1.vy - v2.vy)**2 +(v1.vz - v2.vz)**2))
+                                                        (*ak.unzip(derived_objs["parallel_dsa_pairs"](objs))))
+        ],
+    ),
+    "dsa_pair_xz_distance": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(500, 0, 500, name="dsa_pair_xz_distance",
+                                     label=r" DSA-DSA xz Distance "),
+                  lambda objs, mask: (lambda v1, v2: np.sqrt((v1.vx - v2.vx)**2 +(v1.vz - v2.vz)**2))
+                                                        (*ak.unzip(get_pairs(objs["dsaMuons"]))))
+        ],
+    ),
+    "back_to_back_dsa_pair_xz_distance": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(500, 0, 500, name="back_to_back_dsa_pair_xz_distance",
+                                     label=r"back to back DSA-DSA xz Distance "),
+                  lambda objs, mask: (lambda v1, v2: np.sqrt((v1.vx - v2.vx)**2 +(v1.vz - v2.vz)**2))
+                                                        (*ak.unzip(derived_objs["back_to_back_dsa_pairs"](objs))))
+        ],
+    ),
+    "parallel_dsa_pair_xz_distance": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(500, 0, 500, name="parallel_dsa_pair_xz_distance",
+                                     label=r"back to back DSA-DSA xz Distance "),
+                  lambda objs, mask: (lambda v1, v2: np.sqrt((v1.vx - v2.vx)**2 +(v1.vz - v2.vz)**2))
+                                                        (*ak.unzip(derived_objs["parallel_dsa_pairs"](objs))))
+        ],
+    ),
+    "dsa_pair_yz_distance": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(500, 0, 500, name="dsa_pair_yz_distance",
+                                     label=r" DSA-DSA yz Distance "),
+                  lambda objs, mask: (lambda v1, v2: np.sqrt((v1.vy - v2.vy)**2 +(v1.vz - v2.vz)**2))
+                                                        (*ak.unzip(get_pairs(objs["dsaMuons"]))))
+        ],
+    ),
+    "back_to_back_dsa_pair_yz_distance": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(500, 0, 500, name="back_to_back_dsa_pair_yz_distance",
+                                     label=r"back to back DSA-DSA yz Distance "),
+                  lambda objs, mask: (lambda v1, v2: np.sqrt((v1.vy - v2.vy)**2 +(v1.vz - v2.vz)**2))
+                                                        (*ak.unzip(derived_objs["back_to_back_dsa_pairs"](objs))))
+        ],
+    ),
+    "parallel_dsa_pair_yz_distance": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(500, 0, 500, name="parallel_dsa_pair_yz_distance",
+                                     label=r"parallel DSA-DSA yz Distance "),
+                  lambda objs, mask: (lambda v1, v2: np.sqrt((v1.vy - v2.vy)**2 +(v1.vz - v2.vz)**2))
+                                                        (*ak.unzip(derived_objs["parallel_dsa_pairs"](objs))))
+        ],
+    ),
+    "dsa_pair_xy_distance": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(500, 0, 500, name="dsa_pair_xy_distance",
+                                     label=r" DSA-DSA xz Distance "),
+                  lambda objs, mask: (lambda v1, v2: np.sqrt((v1.vx - v2.vx)**2 +(v1.vy - v2.vy)**2))
+                                                        (*ak.unzip(get_pairs(objs["dsaMuons"]))))
+        ],
+    ),
+    "back_to_back_dsa_pair_xy_distance": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(500, 0, 500, name="back_to_back_dsa_pair_xy_distance",
+                                     label=r"back to back DSA-DSA xy Distance "),
+                  lambda objs, mask: (lambda v1, v2: np.sqrt((v1.vx - v2.vx)**2 +(v1.vy - v2.vy)**2))
+                                                        (*ak.unzip(derived_objs["back_to_back_dsa_pairs"](objs))))
+        ],
+    ),
+    "parallel_dsa_pair_xy_distance": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(500, 0, 500, name="parallel_dsa_pair_xy_distance",
+                                     label=r"back to back DSA-DSA xy Distance "),
+                  lambda objs, mask: (lambda v1, v2: np.sqrt((v1.vx - v2.vx)**2 +(v1.vy - v2.vy)**2))
+                                                        (*ak.unzip(derived_objs["parallel_dsa_pairs"](objs))))
+        ],
+    ),
+    "dsa_pair_nearest_lj_index_diff": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(15, 0, 15, name="dsa_pair_nearest_lj_index_diff",
+                                     label=r" DSA-DSA pair abs( nearest LJ index) "),
+                  lambda objs, mask: (lambda v1, v2, objs: abs(nearest_lj_index(v1, objs)  - nearest_lj_index(v2, objs)))(*ak.unzip(get_pairs(objs["dsaMuons"])), objs["ljs"])),
+        ],
+    ),
+    "back_to_back_dsa_pair_nearest_lj_index_diff": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(15, 0, 15, name="back_to_back_dsa_pair_nearest_lj_index_diff",
+                                     label=r" back to back DSA-DSA pair abs(nearest LJ index difference) "),
+                  lambda objs, mask: (lambda v1, v2, objs: abs(nearest_lj_index(v1, objs)  - nearest_lj_index(v2, objs)))(*ak.unzip(derived_objs["back_to_back_dsa_pairs"](objs)), objs["ljs"])),
+        ],
+    ),
+    "parallel_dsa_pair_nearest_lj_index_diff": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(15, 0, 15, name="parallel_dsa_pair_nearest_lj_index_diff",
+                                     label=r"parallel DSA-DSA pair abs(nearest LJ index difference) "),
+                  lambda objs, mask: (lambda v1, v2, objs: abs(nearest_lj_index(v1, objs)  - nearest_lj_index(v2, objs)))(*ak.unzip(derived_objs["parallel_dsa_pairs"](objs)), objs["ljs"])),
+        ],
+    ),
+    "dsa_pair_vx_diff": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(500, 0, 500, name="dsa_pair_vx_diff",
+                                     label=r" abs(DSA $\mu$1 Vx - , DSA $\mu$2 Vx ) "),
+                  lambda objs, mask: (lambda v1, v2: abs(v1.vx - v2.vx))(*ak.unzip(get_pairs(objs["dsaMuons"])))),
+        ],
+    ),
+    "back_to_back_dsa_pair_vx_diff": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(500, 0, 500, name="back to back dsa_pair_vx_diff",
+                                     label=r" back to back abs(DSA $\mu$1 Vx - , DSA $\mu$2 Vx ) "),
+                  lambda objs, mask: (lambda v1, v2: abs(v1.vx - v2.vx))(*ak.unzip(derived_objs["back_to_back_dsa_pairs"](objs)))),
+        ],
+    ),
+    "parallel_dsa_pair_vx_diff": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(500, 0, 500, name="parallel dsa_pair_vx_diff",
+                                     label=r" parallel abs(DSA $\mu$1 Vx -  DSA $\mu$2 Vx ) "),
+                  lambda objs, mask: (lambda v1, v2: abs(v1.vx - v2.vx))(*ak.unzip(derived_objs["parallel_dsa_pairs"](objs)))),
+        ],
+    ),
+    "dsa_pair_vy_diff": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(500, 0, 500, name="dsa_pair_vx_diff",
+                                     label=r" abs(DSA $\mu$1 Vy - DSA $\mu$2 Vy ) "),
+                  lambda objs, mask: (lambda v1, v2: abs(v1.vy - v2.vy))(*ak.unzip(get_pairs(objs["dsaMuons"])))),
+        ],
+    ),
+    "back_to_back_dsa_pair_vy_diff": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(500, 0, 500, name="back to back dsa_pair_vy_diff",
+                                     label=r" back to back abs(DSA $\mu$1 Vy - DSA $\mu$2 Vy ) "),
+                  lambda objs, mask: (lambda v1, v2: abs(v1.vy - v2.vy))(*ak.unzip(derived_objs["back_to_back_dsa_pairs"](objs)))),
+        ],
+    ),
+    "parallel_dsa_pair_vy_diff": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(500, 0, 500, name="parallel dsa_pair_vy_diff",
+                                     label=r" parallel abs(DSA $\mu$1 Vy - DSA $\mu$2 Vy ) "),
+                  lambda objs, mask: (lambda v1, v2: abs(v1.vy - v2.vy))(*ak.unzip(derived_objs["parallel_dsa_pairs"](objs)))),
+        ],
+    ),
+    "dsa_pair_vz_diff": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(500, 0, 500, name="dsa_pair_vx_diff",
+                                     label=r" abs(DSA $\mu$1 Vz - DSA $\mu$2 Vz ) "),
+                   lambda objs, mask: (lambda v1, v2: abs(v1.vz - v2.vz))(*ak.unzip(get_pairs(objs["dsaMuons"])))),
+        ],
+    ),
+    "back_to_back_dsa_pair_vz_diff": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(500, 0, 500, name="back to back dsa_pair_vz_diff",
+                                     label=r" back to back abs(DSA $\mu$1 Vz - DSA $\mu$2 Vz ) "),
+                  lambda objs, mask: (lambda v1, v2: abs(v1.vz - v2.vz))(*ak.unzip(derived_objs["back_to_back_dsa_pairs"](objs)))),
+        ],
+    ),
+    "parallel_dsa_pair_vz_diff": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(500, 0, 500, name="parallel dsa_pair_vz_diff",
+                                     label=r" parallel abs(DSA $\mu$1 Vz - DSA $\mu$2 Vz ) "),
+                  lambda objs, mask: (lambda v1, v2: abs(v1.vz - v2.vz))(*ak.unzip(derived_objs["parallel_dsa_pairs"](objs)))),
+        ],
+    ),
+    "dsa_pair_dxy_diff": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(500, 0, 500, name="dsa_pair_dxy_diff",
+                                     label=r" abs(DSA $\mu$1 $d_{xy}$ - DSA $\mu$2 $d_{xy}$ ) "),
+                   lambda objs, mask: (lambda v1, v2: abs(v1.dxy - v2.dxy))(*ak.unzip(get_pairs(objs["dsaMuons"])))),
+        ]
+    ),
+    "back_to_back_dsa_pair_dxy_diff": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(500, 0, 500, name="back to back dsa_pair_dxy_diff",
+                                     label=r" back to back abs(DSA $\mu$1 dxy - DSA $\mu$2 dxy ) "),
+                  lambda objs, mask: (lambda v1, v2: abs(v1.dxy - v2.dxy))(*ak.unzip(derived_objs["back_to_back_dsa_pairs"](objs)))),
+        ],
+    ),
+    "parallel_dsa_pair_dxy_diff": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(500, 0, 500, name="parallel dsa_pair_dxy_diff",
+                                     label=r" parallel abs(DSA $\mu$1 dxy - DSA $\mu$2 dxy ) "),
+                  lambda objs, mask: (lambda v1, v2: abs(v1.dxy - v2.dxy))(*ak.unzip(derived_objs["parallel_dsa_pairs"](objs)))),
+        ],
+    ),
+    "dsa_pair_dz_diff": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(500, 0, 500, name="dsa_pair_dz_diff",
+                                     label=r" abs(DSA $\mu$1 $d_z$ - DSA $\mu$2 $d_z$ ) "),
+                   lambda objs, mask: (lambda v1, v2: abs(v1.dz - v2.dz))(*ak.unzip(get_pairs(objs["dsaMuons"])))),
+        ],
+    ),
+    "back_to_back_dsa_pair_dz_diff": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(500, 0, 500, name="back to back dsa_pair_dz_diff",
+                                     label=r" back to back abs(DSA $\mu$1 dz - DSA $\mu$2 dz ) "),
+                  lambda objs, mask: (lambda v1, v2: abs(v1.dz - v2.dz))(*ak.unzip(derived_objs["back_to_back_dsa_pairs"](objs)))),
+        ],
+    ),
+    "parallel_dsa_pair_dz_diff": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(500, 0, 500, name="parallel dsa_pair_dz_diff",
+                                     label=r" parallel abs(DSA $\mu$1 dz - DSA $\mu$2 dz ) "),
+                  lambda objs, mask: (lambda v1, v2: abs(v1.dz - v2.dz))(*ak.unzip(derived_objs["parallel_dsa_pairs"](objs)))),
+        ],
+    ),
+    "dsa_pair_eta_diff": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 6, name="dsa_pair_eta_diff",
+                                     label=r" abs(DSA $\mu$1 $\eta$ - DSA $\mu$2 $\eta$ ) "),
+                   lambda objs, mask: (lambda v1, v2: abs(v1.eta - v2.eta))(*ak.unzip(get_pairs(objs["dsaMuons"])))),
+        ],
+    ),
+    "back_to_back_dsa_pair_eta_diff": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 6, name="back to back dsa_pair_eta_diff",
+                                     label=r" back to back abs(DSA $\mu$1 $\eta$ - DSA $\mu$1 $\eta$ ) "),
+                  lambda objs, mask: (lambda v1, v2: abs(v1.eta - v2.eta))(*ak.unzip(derived_objs["back_to_back_dsa_pairs"](objs)))),
+        ],
+    ),
+    "parallel_dsa_pair_eta_diff": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 7, name="parallel dsa_pair_eta_diff",
+                                     label=r" parallel abs(DSA $\mu$1 $\eta$ - DSA $\mu$2 $\eta$ ) "),
+                  lambda objs, mask: (lambda v1, v2: abs(v1.eta - v2.eta))(*ak.unzip(derived_objs["parallel_dsa_pairs"](objs)))),
+        ],
+    ),
+    "dsa_pair_phi_diff": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 7, name="dsa_pair_phi_diff",
+                                     label=r" abs(DSA $\mu$1 $\phi$ - DSA $\mu$2 $\phi$ ) "),
+                   lambda objs, mask: (lambda v1, v2: abs(v1.phi - v2.phi))(*ak.unzip(get_pairs(objs["dsaMuons"])))),
+        ],
+    ),
+    "back_to_back_dsa_pair_phi_diff": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 7, name="back to back dsa_pair_eta_diff",
+                                     label=r" back to back abs(DSA $\mu$1 $\phi$ - DSA $\mu$2 $\phi$ ) "),
+                  lambda objs, mask: (lambda v1, v2: abs(v1.phi - v2.phi))(*ak.unzip(derived_objs["back_to_back_dsa_pairs"](objs)))),
+        ],
+    ),
+    "parallel_dsa_pair_phi_diff": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(100, 0, 7, name="parallel dsa_pair_phi_diff",
+                                     label=r" parallel abs(DSA $\mu$1 $\phi$ - DSA $\mu$2 $\phi$ ) "),
+                  lambda objs, mask: (lambda v1, v2: abs(v1.phi - v2.phi))(*ak.unzip(derived_objs["parallel_dsa_pairs"](objs)))),
+        ],
+    ),
+    "dsa_pair_charge_diff": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(5, 0, 5, name="dsa_pair_charge_diff",
+                                     label=r" abs(DSA $\mu$1 charge - DSA $\mu$2 charge ) "),
+                  lambda objs, mask: (lambda v1, v2: abs(v1.charge - v2.charge))(*ak.unzip(get_pairs(objs["dsaMuons"])))),
+        ],
+    ),
+    "back_to_back_dsa_pair_charge_diff": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(5, 0, 5, name="back to back dsa_pair_charge_diff",
+                                     label=r" back to back abs(DSA $\mu$1 $\phi$ - DSA $\mu$2 $\phi$ ) "),
+                  lambda objs, mask: (lambda v1, v2: abs(v1.charge - v2.charge))(*ak.unzip(derived_objs["back_to_back_dsa_pairs"](objs)))),
+        ],
+    ),
+    "parallel_dsa_pair_charge_diff": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(5, 0, 5, name="parallel dsa_pair_charge_diff",
+                                     label=r" parallel abs(DSA $\mu$1 charge - DSA $\mu$2 charge ) "),
+                  lambda objs, mask: (lambda v1, v2: abs(v1.charge - v2.charge))(*ak.unzip(derived_objs["parallel_dsa_pairs"](objs)))),
+        ],
+    ),
+    "dsa_pair_pt": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(200, 0, 500, name="dsa_pair_pt1",
+                                     label=r" DSA $\mu$1 $p_T$"),
+                  lambda objs, mask: (lambda v1: v1.pt)(*ak.unzip(get_pairs(objs["dsaMuons"]))[0:1])),
+            h.Axis(hist.axis.Regular(200, 0, 500, name="dsa_pair_pt2",
+                                     label=r" DSA $\mu$2 $p_T$"),
+                  lambda objs, mask: (lambda v2: v2.pt)(*ak.unzip(get_pairs(objs["dsaMuons"]))[1:2])),
+        ],
+    ),
+    "back_to_back_dsa_pair_pt": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(200, 0, 500, name="back_to_back_dsa_pair_pt1",
+                                     label=r" back to back DSA $\mu$1 $p_T$"),
+                  lambda objs, mask: (lambda v1: v1.pt)(*ak.unzip(derived_objs["back_to_back_dsa_pairs"](objs))[0:1])),
+            h.Axis(hist.axis.Regular(200, 0, 500, name="back_to_back_dsa_pair_pt2",
+                                     label=r" back to back DSA $\mu$2 $p_T$"),
+                  lambda objs, mask: (lambda v2: v2.pt)(*ak.unzip(derived_objs["back_to_back_dsa_pairs"](objs))[1:2])),
+        ],
+    ),
+    "parallel_dsa_pair_pt": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(200, 0, 500, name="parallel_dsa_pair_pt1",
+                                     label=r" parallel DSA $\mu$1 $p_T$"),
+                  lambda objs, mask: (lambda v1: v1.pt)(*ak.unzip(derived_objs["parallel_dsa_pairs"](objs))[0:1])),
+            h.Axis(hist.axis.Regular(200, 0, 500, name="parallel_dsa_pair_pt2",
+                                     label=r" parallel DSA $\mu$2 $p_T$"),
+                  lambda objs, mask: (lambda v2: v2.pt)(*ak.unzip(derived_objs["parallel_dsa_pairs"](objs))[1:2])),
+        ],
+    ),
+    "dsa_pair_vx": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(200, -500, 500, name="dsa_pair_vx 1",
+                                     label=r" DSA $\mu$1 Vx"),
+                  lambda objs, mask: (lambda v1: v1.vx)(*ak.unzip(get_pairs(objs["dsaMuons"]))[0:1])),
+            h.Axis(hist.axis.Regular(200, -500, 500, name="dsa_pair_vx 2",
+                                     label=r" DSA $\mu$2 Vx"),
+                  lambda objs, mask: (lambda v2: v2.vx)(*ak.unzip(get_pairs(objs["dsaMuons"]))[1:2])),
+        ],
+    ),
+    "back_to_back_dsa_pair_vx": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(200, -500, 500, name="back_to_back_dsa_pair_vx1",
+                                     label=r" back to back DSA $\mu$1 Vx "),
+                  lambda objs, mask: (lambda v1: v1.vx)(*ak.unzip(derived_objs["back_to_back_dsa_pairs"](objs))[0:1])),
+            h.Axis(hist.axis.Regular(200, -500, 500, name="back_to_back_dsa_pair_vx2",
+                                     label=r" back to back DSA $\mu$2 Vx "),
+                  lambda objs, mask: (lambda v2: v2.vx)(*ak.unzip(derived_objs["back_to_back_dsa_pairs"](objs))[1:2])),
+        ],
+    ),
+    "parallel_dsa_pair_vx": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(200, -500, 500, name="parallel_dsa_pair_vx1",
+                                     label=r"parallel DSA $\mu$1 Vx "),
+                  lambda objs, mask: (lambda v1: v1.vx)(*ak.unzip(derived_objs["parallel_dsa_pairs"](objs))[0:1])),
+            h.Axis(hist.axis.Regular(200, -500, 500, name="parallel_dsa_pair_vx2",
+                                     label=r"parallel DSA $\mu$2 Vx "),
+                  lambda objs, mask: (lambda v2: v2.vx)(*ak.unzip(derived_objs["parallel_dsa_pairs"](objs))[1:2])),
+        ],
+    ),
+    "dsa_pair_vy": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(200, -500, 500, name="dsa_pair_vy1",
+                                     label=r" DSA $\mu$1 Vy"),
+                  lambda objs, mask: (lambda v1: v1.vy)(*ak.unzip(get_pairs(objs["dsaMuons"]))[0:1])),
+            h.Axis(hist.axis.Regular(200, -500, 500, name="dsa_pair_vy2",
+                                     label=r" DSA $\mu$2 Vy"),
+                  lambda objs, mask: (lambda v2: v2.vy)(*ak.unzip(get_pairs(objs["dsaMuons"]))[1:2])),
+        ],
+    ),
+    "back_to_back_dsa_pair_vy": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(200, -500, 500, name="back_to_back_dsa_pair_vy1",
+                                     label=r" back to back DSA $\mu$1 Vy"),
+                  lambda objs, mask: (lambda v1: v1.vy)(*ak.unzip(derived_objs["back_to_back_dsa_pairs"](objs))[0:1])),
+            h.Axis(hist.axis.Regular(200, -500, 500, name="back_to_back_dsa_pair_vy2",
+                                     label=r" back to back DSA $\mu$2 Vy"),
+                  lambda objs, mask: (lambda v2: v2.vy)(*ak.unzip(derived_objs["back_to_back_dsa_pairs"](objs))[1:2])),
+        ],
+    ),
+    "parallel_dsa_pair_vy": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(200, -500, 500, name="parallel_dsa_pair_vy1",
+                                     label=r" parallel DSA $\mu$1 Vy"),
+                  lambda objs, mask: (lambda v1: v1.vy)(*ak.unzip(derived_objs["parallel_dsa_pairs"](objs))[0:1])),
+            h.Axis(hist.axis.Regular(200, -500, 500, name="parallel_dsa_pair_vy2",
+                                     label=r" parallel DSA $\mu$2 Vy"),
+                  lambda objs, mask: (lambda v2: v2.vy)(*ak.unzip(derived_objs["parallel_dsa_pairs"](objs))[1:2])),
+        ],
+    ),
+    "dsa_pair_vz": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(200, -500, 500, name="dsa_pair_vz1",
+                                     label=r" DSA $\mu$1 Vz"),
+                  lambda objs, mask: (lambda v1: v1.vz)(*ak.unzip(get_pairs(objs["dsaMuons"]))[0:1])),
+            h.Axis(hist.axis.Regular(200, -500, 500, name="dsa_pair_vz2",
+                                     label=r" DSA $\mu$2 Vz"),
+                  lambda objs, mask: (lambda v2: v2.vz)(*ak.unzip(get_pairs(objs["dsaMuons"]))[1:2])),
+        ],
+    ),
+    "back_to_back_dsa_pair_vz": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(200, -500, 500, name="back_to_back_dsa_pair_vz1",
+                                     label=r" back to back DSA $\mu$1 Vz"),
+                  lambda objs, mask: (lambda v1: v1.vz)(*ak.unzip(derived_objs["back_to_back_dsa_pairs"](objs))[0:1])),
+            h.Axis(hist.axis.Regular(200, -500, 500, name="back_to_back_dsa_pair_vz2",
+                                     label=r" back to back DSA $\mu$2 Vz"),
+                  lambda objs, mask: (lambda v2: v2.vz)(*ak.unzip(derived_objs["back_to_back_dsa_pairs"](objs))[1:2])),
+        ],
+    ),
+    "parallel_dsa_pair_vz": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(200, -500, 500, name="parallel_dsa_pair_vz1",
+                                     label=r" parallel DSA $\mu$1 Vz"),
+                  lambda objs, mask: (lambda v1: v1.vz)(*ak.unzip(derived_objs["parallel_dsa_pairs"](objs))[0:1])),
+            h.Axis(hist.axis.Regular(200, -500, 500, name="parallel_dsa_pair_vz2",
+                                     label=r" parallel DSA $\mu$2 Vz"),
+                  lambda objs, mask: (lambda v2: v2.vz)(*ak.unzip(derived_objs["parallel_dsa_pairs"](objs))[1:2])),
+        ],
+    ),
+    "dsa_pair_dxy": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(200, -500, 500, name="dsa_pair_dxy1",
+                                     label=r" DSA $\mu$1 dxy"),
+                  lambda objs, mask: (lambda v1: v1.dxy)(*ak.unzip(get_pairs(objs["dsaMuons"]))[0:1])),
+            h.Axis(hist.axis.Regular(200, -500, 500, name="dsa_pair_dxy2",
+                                     label=r" DSA $\mu$2 dxy"),
+                  lambda objs, mask: (lambda v2: v2.dxy)(*ak.unzip(get_pairs(objs["dsaMuons"]))[1:2])),
+        ],
+    ),
+    "back_to_back_dsa_pair_dxy": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(200, -500, 500, name="back_to_back_dsa_pair_dxy1",
+                                     label=r" back to back DSA $\mu$1 dxy"),
+                  lambda objs, mask: (lambda v1: v1.dxy)(*ak.unzip(derived_objs["back_to_back_dsa_pairs"](objs))[0:1])),
+            h.Axis(hist.axis.Regular(200, -500, 500, name="back_to_back_dsa_pair_dxy2",
+                                     label=r" back to back DSA $\mu$2 dxy"),
+                  lambda objs, mask: (lambda v2: v2.dxy)(*ak.unzip(derived_objs["back_to_back_dsa_pairs"](objs))[1:2])),
+        ],
+    ),
+    "parallel_dsa_pair_dxy": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(200, -500, 500, name="parallel_dsa_pair_dxy1",
+                                     label=r" parallel DSA $\mu$1 dxy"),
+                  lambda objs, mask: (lambda v1: v1.dxy)(*ak.unzip(derived_objs["parallel_dsa_pairs"](objs))[0:1])),
+            h.Axis(hist.axis.Regular(200, -500, 500, name="parallel_dsa_pair_dxy2",
+                                     label=r" parallel DSA $\mu$2 dxy"),
+                  lambda objs, mask: (lambda v2: v2.dxy)(*ak.unzip(derived_objs["parallel_dsa_pairs"](objs))[1:2])),
+        ],
+    ),
+     "dsa_pair_dz": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(200, -500, 500, name="dsa_pair_dz1",
+                                     label=r" DSA $\mu$1 dz"),
+                  lambda objs, mask: (lambda v1: v1.dz)(*ak.unzip(get_pairs(objs["dsaMuons"]))[0:1])),
+            h.Axis(hist.axis.Regular(200, -500, 500, name="dsa_pair_dz2",
+                                     label=r" DSA $\mu$2 dz"),
+                  lambda objs, mask: (lambda v2: v2.dz)(*ak.unzip(get_pairs(objs["dsaMuons"]))[1:2])),
+        ],
+    ),
+    "back_to_back_dsa_pair_dz": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(200, -500, 500, name="back_to_back_dsa_pair_dz1",
+                                     label=r" back to back DSA $\mu$1 dz"),
+                  lambda objs, mask: (lambda v1: v1.dz)(*ak.unzip(derived_objs["back_to_back_dsa_pairs"](objs))[0:1])),
+            h.Axis(hist.axis.Regular(200, -500, 500, name="back_to_back_dsa_pair_dz2",
+                                     label=r" back to back DSA $\mu$2 dz"),
+                  lambda objs, mask: (lambda v2: v2.dz)(*ak.unzip(derived_objs["back_to_back_dsa_pairs"](objs))[1:2])),
+        ],
+    ),
+    "parallel_dsa_pair_dz": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(200, -500, 500, name="parallel_dsa_pair_dz1",
+                                     label=r" parallel DSA $\mu$1 dz"),
+                  lambda objs, mask: (lambda v1: v1.dz)(*ak.unzip(derived_objs["parallel_dsa_pairs"](objs))[0:1])),
+            h.Axis(hist.axis.Regular(200, -500, 500, name="parallel_dsa_pair_dz2",
+                                     label=r" parallel DSA $\mu$2 dz"),
+                  lambda objs, mask: (lambda v2: v2.dz)(*ak.unzip(derived_objs["parallel_dsa_pairs"](objs))[1:2])),
+        ],
+    ),
+    "dsa_pair_eta": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(200, -7, 7, name="dsa_pair_eta1",
+                                     label=r" DSA $\mu$1 $\eta$"),
+                  lambda objs, mask: (lambda v1: v1.eta)(*ak.unzip(get_pairs(objs["dsaMuons"]))[0:1])),
+            h.Axis(hist.axis.Regular(200, -7, 7, name="dsa_pair_eta2",
+                                     label=r" DSA $\mu$2 $\eta$"),
+                  lambda objs, mask: (lambda v2: v2.eta)(*ak.unzip(get_pairs(objs["dsaMuons"]))[1:2])),
+        ],
+    ),
+    "back_to_back_dsa_pair_eta": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(200, -7, 7, name="back_to_back_dsa_pair_eta1",
+                                     label=r" back to back DSA $\mu$1 $\eta$"),
+                  lambda objs, mask: (lambda v1: v1.eta)(*ak.unzip(derived_objs["back_to_back_dsa_pairs"](objs))[0:1])),
+            h.Axis(hist.axis.Regular(200, -7, 7, name="back_to_back_dsa_pair_eta2",
+                                     label=r" back to back DSA $\mu$2 $\eta$"),
+                  lambda objs, mask: (lambda v2: v2.eta)(*ak.unzip(derived_objs["back_to_back_dsa_pairs"](objs))[1:2])),
+        ],
+    ),
+    "parallel_dsa_pair_eta": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(200, -7, 7, name="parallel_dsa_pair_eta1",
+                                     label=r" parallel DSA $\mu$1 $\eta$"),
+                  lambda objs, mask: (lambda v1: v1.eta)(*ak.unzip(derived_objs["parallel_dsa_pairs"](objs))[0:1])),
+            h.Axis(hist.axis.Regular(200, -7, 7, name="parallel_dsa_pair_eta2",
+                                     label=r" parallel DSA $\mu$2 $\eta$"),
+                  lambda objs, mask: (lambda v2: v2.eta)(*ak.unzip(derived_objs["parallel_dsa_pairs"](objs))[1:2])),
+        ],
+    ),
+    "dsa_pair_phi": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(200, -3.2, 3.2, name="dsa_pair_phi1",
+                                     label=r" DSA $\mu$1 $\phi$"),
+                  lambda objs, mask: (lambda v1: v1.phi)(*ak.unzip(get_pairs(objs["dsaMuons"]))[0:1])),
+            h.Axis(hist.axis.Regular(200, -3.2, 3.2, name="dsa_pair_phi2",
+                                     label=r" DSA $\mu$2 $\phi$"),
+                  lambda objs, mask: (lambda v2: v2.phi)(*ak.unzip(get_pairs(objs["dsaMuons"]))[1:2])),
+        ],
+    ),
+    "back_to_back_dsa_pair_phi": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(200, -3.2, 3.2, name="back_to_back_dsa_pair_phi1",
+                                     label=r" back to back DSA $\mu$1 $\phi$"),
+                  lambda objs, mask: (lambda v1: v1.phi)(*ak.unzip(derived_objs["back_to_back_dsa_pairs"](objs))[0:1])),
+            h.Axis(hist.axis.Regular(200, -3.2, 3.2, name="back_to_back_dsa_pair_phi2",
+                                     label=r" back to back DSA $\mu$2 $\phi$"),
+                  lambda objs, mask: (lambda v2: v2.phi)(*ak.unzip(derived_objs["back_to_back_dsa_pairs"](objs))[1:2])),
+        ],
+    ),
+    "parallel_dsa_pair_phi": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(200, -3.2, 3.2, name="parallel_dsa_pair_phi1",
+                                     label=r" parallel DSA $\mu$1 $\phi$"),
+                  lambda objs, mask: (lambda v1: v1.phi)(*ak.unzip(derived_objs["parallel_dsa_pairs"](objs))[0:1])),
+            h.Axis(hist.axis.Regular(200, -3.2, 3.2, name="parallel_dsa_pair_phi2",
+                                     label=r" parallel DSA $\mu$2 $\phi$"),
+                  lambda objs, mask: (lambda v2: v2.phi)(*ak.unzip(derived_objs["parallel_dsa_pairs"](objs))[1:2])),
+        ],
+    ),
+    "dsa_pair_charge": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(10, -5, 5, name="dsa_pair_charge1",
+                                     label=r" DSA $\mu$1 charge"),
+                  lambda objs, mask: (lambda v1: v1.charge)(*ak.unzip(get_pairs(objs["dsaMuons"]))[0:1])),
+            h.Axis(hist.axis.Regular(10, -5, 5, name="dsa_pair_charge2",
+                                     label=r" DSA $\mu$2 charge"),
+                  lambda objs, mask: (lambda v2: v2.charge)(*ak.unzip(get_pairs(objs["dsaMuons"]))[1:2])),
+        ],
+    ),
+    "back_to_back_dsa_pair_charge": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(10, -5, 5, name="back_to_back_dsa_pair_charge1",
+                                     label=r" back to back DSA $\mu$1 charge"),
+                  lambda objs, mask: (lambda v1: v1.charge)(*ak.unzip(derived_objs["back_to_back_dsa_pairs"](objs))[0:1])),
+            h.Axis(hist.axis.Regular(10, -5, 5, name="back_to_back_dsa_pair_charge2",
+                                     label=r" back to back DSA $\mu$2 charge"),
+                  lambda objs, mask: (lambda v2: v2.charge)(*ak.unzip(derived_objs["back_to_back_dsa_pairs"](objs))[1:2])),
+        ],
+    ),
+    "parallel_dsa_pair_charge": h.Histogram(
+        [
+            h.Axis(hist.axis.Regular(10, -5, 5, name="parallel_dsa_pair_charge1",
+                                     label=r" parallel DSA $\mu$1 charge"),
+                  lambda objs, mask: (lambda v1: v1.charge)(*ak.unzip(derived_objs["parallel_dsa_pairs"](objs))[0:1])),
+            h.Axis(hist.axis.Regular(10, -5, 5, name="parallel_dsa_pair_charge2",
+                                     label=r" parallel DSA $\mu$2 charge"),
+                  lambda objs, mask: (lambda v2: v2.charge)(*ak.unzip(derived_objs["parallel_dsa_pairs"](objs))[1:2])),
+        ],
+    ),
+
 }
