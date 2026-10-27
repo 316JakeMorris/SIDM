@@ -15,7 +15,7 @@ from distributed.diagnostics.plugin import UploadDirectory
 def make_dask_client(address):
     """Create dask client that includes dependency installer (coffea-casa)."""
     dependencies = [
-        "git+https://github.com/316JakeMorris/SIDM.git@LJ_eta_study",
+        "git+https://github.com/316JakeMorris/SIDM.git@lepton_reco_eff",
     ]
     client = Client(address)
     client.register_plugin(PipInstall(packages=dependencies, pip_options=["--upgrade", "--no-cache-dir"]))

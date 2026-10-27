@@ -60461,7 +60461,7 @@ skimmed_llpNanoAOD_v2:
       - skimmed_output_12.root
       - skimmed_output_120.root
       - skimmed_output_1200.root
-      # - skimmed_output_1201.root # DeserializationError, RuntimeError: Unable to evaluate event cut: pass flags
+      - skimmed_output_1201.root
       - skimmed_output_1202.root
       - skimmed_output_1203.root
       - skimmed_output_1204.root
