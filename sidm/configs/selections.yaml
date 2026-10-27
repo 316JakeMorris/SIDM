@@ -470,19 +470,21 @@ base_ljObjCut_ljIso_2lj_endcap: &base_ljObjCut_ljIso_2lj_endcap
     # - "egm_ljs = 0" #removed because the 4mu cut makes us orthogonal to the 2mu2e signal region anyways. 
     # - ">=2 mu_ljs" #Removed because comparable to 4mu cut
     # - "dPhi(LJ_0, LJ_1) > 2" #Done by mask until we get sequential event cuts
-
-2mu2e_SR: &2mu2e_SR
-    <<: *2mu2e
-    postLj_obj_cuts:
-        ljs:
-          - *base_ljObjCut_ljIso_2lj
-          - "dPhi > 2"
-        egm_ljs:
-          - *base_ljObjCut_ljIso_2lj
-          - "displaced"
-        mu_ljs:
-          - *base_ljObjCut_ljIso_2lj
-          - "displaced"
+#Oct 26 2026: Commented this out on lepton_reco_eff branch. 
+#The base_ljObjCut_ljIso_2lj selection seems to have been turned into separate _barrel and _endcap variants. 
+#Commenting this out is fine for the lepton_reco_eff branch, only messes up the LJ_Eta branch
+# 2mu2e_SR: &2mu2e_SR
+#     <<: *2mu2e
+#     postLj_obj_cuts:
+#         ljs:
+#           - *base_ljObjCut_ljIso_2lj
+#           - "dPhi > 2"
+#         egm_ljs:
+#           - *base_ljObjCut_ljIso_2lj
+#           - "displaced"
+#         mu_ljs:
+#           - *base_ljObjCut_ljIso_2lj
+#           - "displaced"
 
 base_ljObjCut_ljIso_2pf: &base_ljObjCut_ljIso_2pf
   obj_cuts:

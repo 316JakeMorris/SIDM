@@ -1114,7 +1114,7 @@ mu_ljSpread_pf: &mu_ljSpread_pf
   - "mu_lj_vzSpread_pf"
   - "mu_lj_dxySpread_pf"
   - "mu_lj_dzSpread_pf"
-  - 'mu_lj_pfMu_vzSpread_dzSpread'
+  - "mu_lj_pfMu_vzSpread_dzSpread"
 
 cosAlpha: &cosAlpha
   - "cosAlpha_dsa"
@@ -1174,7 +1174,7 @@ cosmic_veto: &cosmic_veto ##final set of histograms for slides and AN
   - "mulj_egmlj_invmass"
   - "lj_lj_invmass"
   
-  jake_test_collection: &jake_test_collection
+jake_test_collection: &jake_test_collection
   - "jake_test"
   #- "jake_test_no_mask" #WORKS by itself!!!
   - "lj_lj_mass_diff"
