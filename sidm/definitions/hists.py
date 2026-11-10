@@ -5706,3 +5706,105 @@ hist_defs.update({
     "dsaMuon_nearGenA_ge1_genA_lxy": genA_lxy_recoEff("genAs_toMu", "dsaMuons", min_n=1),
     "dsaMuon_nearGenA_ge2_genA_lxy": genA_lxy_recoEff("genAs_toMu", "dsaMuons", min_n=2),
 })
+
+
+# ---------------------------------------------------------------------------------------------
+# Lepton reconstruction efficiency vs dark photon Lxy, measured PER GEN LEPTON
+#
+# How the efficiency is defined:
+#   Here every gen lepton from a dark photon (A) decay is one trial, so each A->ll contributes two
+#   entries to the denominator (one per daughter lepton) instead of one.
+#     1. Gen leptons: the two direct daughters of each gen A of the right flavor. Electrons and
+#        photons are compared to the electrons from A->ee ("genAs_toE"), PF and DSA muons to the
+#        muons from A->mumu ("genAs_toMu"). The daughters are taken from A.children rather than
+#        from objs["genEs"]/objs["genMus"], because the channel's "status 1" gen cuts select the
+#        final-state copies, which are not linked directly to the A.
+#     2. Each gen lepton is given the Lxy of its parent A (the lepton production vertex), so the
+#        x axis is the same as for the per-dark-photon efficiency above.
+#     3. Gen leptons are matched one-to-one to reco objects of the given type within
+#        dR(gen lepton, reco) < recoEff_lepton_dr (see unique_dR_match). One-to-one matters for
+#        collimated pairs: a single reco object near both leptons of a pair only reconstructs one
+#        of them, so it can never count twice. Only reco objects passing the channel's object cuts
+#        can be matched.
+#     4. efficiency(Lxy bin) = (# matched gen leptons in the bin) / (# gen leptons in the bin)
+#   There is no min_n here: each gen lepton is simply matched or not. If the per-dark-photon
+#   efficiency used this same one-to-one matching, the per-lepton efficiency would equal the
+#   average of its >=1 and >=2 efficiencies; with the different association (dR < 0.5 to the A,
+#   not one-to-one) the two definitions are related but not interchangeable.
+#   No acceptance (pT/eta) requirement is placed on the gen leptons.
+#
+# Hists defined here:
+#   gen{Es,Mus}_fromA_lxy_recoEff   : parent-A Lxy of every gen e / mu from A decays     (denominator)
+#   <obj>_matchedGen{E,Mu}_genA_lxy : parent-A Lxy of gen leptons matched to an <obj>   (numerator)
+# Efficiencies and their uncertainties are computed and plotted in
+# sidm/studies/lepton_reco/leptonRecoEffPerLepton_vs_lxy.ipynb
+# ---------------------------------------------------------------------------------------------
+# dR cone for gen lepton <-> reco object matching (much tighter than the dR < 0.5 used to associate
+# reco objects with the dark photon, since the reco object is compared to the lepton itself)
+recoEff_lepton_dr = 0.2
+
+def genA_daughters(genAs):
+    """Return the daughters of each gen dark photon, flattened to one list of leptons per event,
+    and the parent dark photon's Lxy for each daughter (same structure as the daughters)."""
+    daughters = genAs.children                                     # [event][A][daughter]
+    daughter_lxy = ak.broadcast_arrays(lxy(genAs), daughters.pt)[0] # parent Lxy copied to each daughter
+    return ak.flatten(daughters, axis=2), ak.flatten(daughter_lxy, axis=2)
+
+def unique_dR_match(gen, reco, dr):
+    """Return a bool per gen object: True if it is matched one-to-one to a reco object within dr.
+
+    Greedy matching in increasing dR: the closest (gen, reco) pair in the event is matched first,
+    both objects are removed, and this repeats until no pair with dR < dr is left. Each reco object
+    can therefore match at most one gen object (and vice versa)."""
+    n_reco = ak.num(reco, axis=1)
+    # all (gen, reco) pairs per event; pair k <-> (gen k // n_reco, reco k % n_reco)
+    pair_dr = ak.flatten(gen.metric_table(reco), axis=2)
+    k = ak.local_index(pair_dr, axis=1)
+    pair_gen, pair_reco = k // n_reco, k % n_reco
+    pair_dr = ak.where(pair_dr < dr, pair_dr, np.inf)  # pairs outside the cone can never match
+    gen_idx = ak.local_index(gen, axis=1)
+    matched = gen_idx < 0  # all False
+    # at most min(n_gen, n_reco) matches per event
+    n_iter = min(ak.max(ak.num(gen, axis=1), initial=0), ak.max(n_reco, initial=0))
+    for _ in range(int(n_iter)):
+        best = ak.argmin(pair_dr, axis=1, keepdims=True)
+        found = ak.fill_none(ak.firsts(pair_dr[best]), np.inf) < np.inf
+        # indices of the best pair; -1 if nothing is left to match in that event
+        g = ak.where(found, ak.fill_none(ak.firsts(pair_gen[best]), -1), -1)
+        r = ak.where(found, ak.fill_none(ak.firsts(pair_reco[best]), -1), -1)
+        matched = matched | (gen_idx == g)
+        # remove every pair that uses the gen or reco object that was just matched
+        pair_dr = ak.where((pair_gen == g) | (pair_reco == r), np.inf, pair_dr)
+    return matched
+
+def gen_lepton_lxy_recoEff(genAs, reco=None, dr=recoEff_lepton_dr):
+    """Histogram of the parent dark photon Lxy of gen leptons from `genAs` decays.
+
+    genAs: "genAs_toE" (gen electrons) or "genAs_toMu" (gen muons)
+    reco:  reco collection the gen leptons must be matched to, e.g. "electrons".
+           None means no reco requirement: every gen lepton is filled (the denominator).
+    dr:    one-to-one matching cone between a gen lepton and a reco object.
+    """
+    def fill(objs, mask):
+        leptons, lepton_lxy = genA_daughters(objs[genAs])
+        if reco is None:
+            return lepton_lxy
+        return lepton_lxy[unique_dR_match(leptons, objs[reco], dr)]
+    return h.Histogram(
+        [
+            h.Axis(hist.axis.Variable(recoEff_lxy_bins, name="genA_lxy",
+                                      label=r"Dark photon $L_{xy}$ [cm]"),
+                   fill),
+        ],
+    )
+
+hist_defs.update({
+    # denominators: all gen leptons from dark photon decays
+    "genEs_fromA_lxy_recoEff": gen_lepton_lxy_recoEff("genAs_toE"),
+    "genMus_fromA_lxy_recoEff": gen_lepton_lxy_recoEff("genAs_toMu"),
+    # numerators: gen leptons matched to a reco object of the given type
+    "electron_matchedGenE_genA_lxy": gen_lepton_lxy_recoEff("genAs_toE", "electrons"),
+    "photon_matchedGenE_genA_lxy": gen_lepton_lxy_recoEff("genAs_toE", "photons"),
+    "muon_matchedGenMu_genA_lxy": gen_lepton_lxy_recoEff("genAs_toMu", "muons"),
+    "dsaMuon_matchedGenMu_genA_lxy": gen_lepton_lxy_recoEff("genAs_toMu", "dsaMuons"),
+})

@@ -596,6 +596,15 @@ lepton_recoEff_lxy: &lepton_recoEff_lxy
   - "dsaMuon_nearGenA_ge1_genA_lxy"
   - "dsaMuon_nearGenA_ge2_genA_lxy"
 
+# numerator/denominator hists for lepton reco efficiency vs dark photon Lxy, per gen lepton
+lepton_recoEff_perLepton_lxy: &lepton_recoEff_perLepton_lxy
+  - "genEs_fromA_lxy_recoEff"
+  - "genMus_fromA_lxy_recoEff"
+  - "electron_matchedGenE_genA_lxy"
+  - "photon_matchedGenE_genA_lxy"
+  - "muon_matchedGenMu_genA_lxy"
+  - "dsaMuon_matchedGenMu_genA_lxy"
+
 electron_photon_base: &electron_photon_base
   - "electron_photon_dR"
 
