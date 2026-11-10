@@ -5624,3 +5624,57 @@ hist_defs = {
     ),
 
 }
+
+
+# ---------------------------------------------------------------------------------------------
+# Lepton reconstruction efficiency vs dark photon Lxy
+#
+# 1D numerator/denominator hists for the per-dark-photon reco efficiency of electrons, photons,
+# PF muons, and DSA muons. Association between reco objects and gen dark photons is the same as in
+# the *_nearGenA_n_genA_lxy hists: a reco object belongs to a gen dark photon if it lies within
+# dR < 0.5 of it, with electrons/photons compared to A->ee and PF/DSA muons compared to A->mumu.
+#   genAs_to{E,Mu}_lxy_recoEff       : Lxy of every gen A->ee / A->mumu (denominator)
+#   <obj>_nearGenA_ge1_genA_lxy      : Lxy of gen As with >=1 associated <obj> (numerator, >=1 reco)
+#   <obj>_nearGenA_ge2_genA_lxy      : Lxy of gen As with >=2 associated <obj> (numerator, both reco)
+# Efficiencies and their uncertainties are computed (and plotted) in
+# sidm/studies/lepton_reco/leptonRecoEff_vs_lxy.ipynb
+# ---------------------------------------------------------------------------------------------
+# finer bins at small Lxy where the tracker-based efficiencies change fastest
+recoEff_lxy_bins = [0, 0.1, 0.2, 0.5, 1, 2, 3, 5, 7, 10, 15, 20, 30, 40, 50, 60, 80, 100, 120,
+                    150, 200, 250, 300, 400, 500]
+
+def genA_lxy_recoEff(genAs, reco=None, min_n=0, dr=0.5):
+    """Histogram of the Lxy of gen dark photons `genAs` that have >= min_n `reco` objects within
+    dR < dr. With reco=None every dark photon is kept (efficiency denominator)."""
+    def fill(objs, mask):
+        genA_lxy = lxy(objs[genAs])
+        if reco is None:
+            return genA_lxy
+        # reco objects within dr, counted per dark photon (same as *_nearGenA_n_genA_lxy)
+        n_near = ak.sum(objs[genAs].metric_table(objs[reco]) < dr, axis=-1)
+        return genA_lxy[n_near >= min_n]
+    return h.Histogram(
+        [
+            h.Axis(hist.axis.Variable(recoEff_lxy_bins, name="genA_lxy",
+                                      label=r"Dark photon $L_{xy}$ [cm]"),
+                   fill),
+        ],
+    )
+
+hist_defs.update({
+    # denominators: all gen dark photons of the relevant decay flavor
+    "genAs_toE_lxy_recoEff": genA_lxy_recoEff("genAs_toE"),
+    "genAs_toMu_lxy_recoEff": genA_lxy_recoEff("genAs_toMu"),
+    # pfelectron-genA
+    "electron_nearGenA_ge1_genA_lxy": genA_lxy_recoEff("genAs_toE", "electrons", min_n=1),
+    "electron_nearGenA_ge2_genA_lxy": genA_lxy_recoEff("genAs_toE", "electrons", min_n=2),
+    # pfphoton-genA
+    "photon_nearGenA_ge1_genA_lxy": genA_lxy_recoEff("genAs_toE", "photons", min_n=1),
+    "photon_nearGenA_ge2_genA_lxy": genA_lxy_recoEff("genAs_toE", "photons", min_n=2),
+    # pfmuon-genA
+    "muon_nearGenA_ge1_genA_lxy": genA_lxy_recoEff("genAs_toMu", "muons", min_n=1),
+    "muon_nearGenA_ge2_genA_lxy": genA_lxy_recoEff("genAs_toMu", "muons", min_n=2),
+    # dsamuon-genA
+    "dsaMuon_nearGenA_ge1_genA_lxy": genA_lxy_recoEff("genAs_toMu", "dsaMuons", min_n=1),
+    "dsaMuon_nearGenA_ge2_genA_lxy": genA_lxy_recoEff("genAs_toMu", "dsaMuons", min_n=2),
+})
