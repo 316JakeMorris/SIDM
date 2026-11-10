@@ -5629,14 +5629,32 @@ hist_defs = {
 # ---------------------------------------------------------------------------------------------
 # Lepton reconstruction efficiency vs dark photon Lxy
 #
-# 1D numerator/denominator hists for the per-dark-photon reco efficiency of electrons, photons,
-# PF muons, and DSA muons. Association between reco objects and gen dark photons is the same as in
-# the *_nearGenA_n_genA_lxy hists: a reco object belongs to a gen dark photon if it lies within
-# dR < 0.5 of it, with electrons/photons compared to A->ee and PF/DSA muons compared to A->mumu.
-#   genAs_to{E,Mu}_lxy_recoEff       : Lxy of every gen A->ee / A->mumu (denominator)
-#   <obj>_nearGenA_ge1_genA_lxy      : Lxy of gen As with >=1 associated <obj> (numerator, >=1 reco)
-#   <obj>_nearGenA_ge2_genA_lxy      : Lxy of gen As with >=2 associated <obj> (numerator, both reco)
-# Efficiencies and their uncertainties are computed (and plotted) in
+# How the efficiency is defined:
+#   The efficiency is measured per gen-level dark photon (A), not per gen lepton. Each A decays to
+#   two gen leptons; we ask how many reco objects of a given type are found near that A.
+#     1. Pick the gen As of the right decay flavor: electrons and photons are compared to A->ee
+#        ("genAs_toE"), PF and DSA muons to A->mumu ("genAs_toMu").
+#     2. For each A, count the reco objects of the given type within dR < 0.5 of the A direction
+#        (n_near). This is the same count used by the *_nearGenA_n_genA_lxy hists. Only reco
+#        objects that survive the channel's object cuts are counted, so the efficiency includes the
+#        effect of e.g. the LJ-source ID cuts when those are part of the channel.
+#     3. The A counts as "reconstructed" if n_near >= min_n (see below).
+#     4. efficiency(Lxy bin) = (# reconstructed As in the bin) / (# As in the bin)
+#   Lxy is the transverse distance between the A production and decay vertices.
+#
+# What min_n is / does:
+#   min_n is the minimum number of associated reco objects an A needs to enter the numerator.
+#     min_n = 1 -> "at least one lepton of the pair was reconstructed"
+#     min_n = 2 -> "both leptons were reconstructed" (stricter, so efficiency(>=2) <= efficiency(>=1))
+#     min_n = 0 -> every A passes, i.e. this is the denominator
+#   Note: with very collimated pairs a single reco object can sit within dR < 0.5 while the other
+#   lepton is lost, which still passes min_n = 1. min_n = 2 is the cleaner "both reconstructed" test.
+#
+# Hists defined here (denominator and numerators share the same Lxy binning):
+#   genAs_to{E,Mu}_lxy_recoEff       : Lxy of every gen A->ee / A->mumu       (denominator, min_n=0)
+#   <obj>_nearGenA_ge1_genA_lxy      : Lxy of gen As with >=1 associated <obj> (numerator,   min_n=1)
+#   <obj>_nearGenA_ge2_genA_lxy      : Lxy of gen As with >=2 associated <obj> (numerator,   min_n=2)
+# Efficiencies (numerator/denominator) and their uncertainties are computed and plotted in
 # sidm/studies/lepton_reco/leptonRecoEff_vs_lxy.ipynb
 # ---------------------------------------------------------------------------------------------
 # finer bins at small Lxy where the tracker-based efficiencies change fastest
@@ -5644,14 +5662,24 @@ recoEff_lxy_bins = [0, 0.1, 0.2, 0.5, 1, 2, 3, 5, 7, 10, 15, 20, 30, 40, 50, 60,
                     150, 200, 250, 300, 400, 500]
 
 def genA_lxy_recoEff(genAs, reco=None, min_n=0, dr=0.5):
-    """Histogram of the Lxy of gen dark photons `genAs` that have >= min_n `reco` objects within
-    dR < dr. With reco=None every dark photon is kept (efficiency denominator)."""
+    """Histogram of the Lxy of the gen dark photons that count as reconstructed.
+
+    genAs: name of the gen dark photon collection, "genAs_toE" or "genAs_toMu"
+    reco:  name of the reco collection to count near each dark photon, e.g. "electrons".
+           None means no reco requirement: every dark photon is filled (the denominator).
+    min_n: minimum number of `reco` objects within dR < dr of a dark photon for it to be filled.
+           1 = at least one lepton reconstructed, 2 = both leptons reconstructed.
+    dr:    association cone around the dark photon direction.
+    """
     def fill(objs, mask):
+        # one entry per gen dark photon
         genA_lxy = lxy(objs[genAs])
         if reco is None:
             return genA_lxy
-        # reco objects within dr, counted per dark photon (same as *_nearGenA_n_genA_lxy)
+        # n_near[event][A] = number of reco objects within dr of that A
+        # (same count as the *_nearGenA_n_genA_lxy hists)
         n_near = ak.sum(objs[genAs].metric_table(objs[reco]) < dr, axis=-1)
+        # keep only the As with at least min_n associated reco objects
         return genA_lxy[n_near >= min_n]
     return h.Histogram(
         [
