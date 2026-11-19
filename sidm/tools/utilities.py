@@ -336,7 +336,9 @@ def plot_ratio(num, den, **kwargs):
         num = [num]
 
     for i, x in enumerate(num):
-        plot(x, flow='none', label=label)
+        # fix: every curve was labeled legend[0]; numerator i now gets legend[i + 1]
+        labels = kwargs.get("legend", [])
+        plot(x, flow='none', label=labels[i + 1] if len(labels) > i + 1 else None)
 
     if "legend" in kwargs:
         ax1.legend(title = kwargs["text"], alignment="left")

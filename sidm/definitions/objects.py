@@ -96,6 +96,8 @@ derived_objs["genAs_matched_muLj"]      = lambda objs, r: matched(objs["genAs"],
 derived_objs["genAs_toMu_matched_muLj"] = lambda objs, r: matched(objs["genAs_toMu"], objs["mu_ljs"], r)
 derived_objs["genAs_matched_egmLj"]     = lambda objs, r: matched(objs["genAs"], objs["egm_ljs"], r)
 derived_objs["genAs_toE_matched_egmLj"] = lambda objs, r: matched(objs["genAs_toE"], objs["egm_ljs"], r)
+derived_objs["genAs_toMu_matched_muons"]    = lambda objs, r: matched(objs["genAs_toMu"], objs["muons"], r)
+derived_objs["genAs_toMu_matched_dsaMuons"] = lambda objs, r: matched(objs["genAs_toMu"], objs["dsaMuons"], r)
 derived_objs["mu_lj_matched_genAs_toMu"]   = lambda objs, r: matched(objs["mu_ljs"], objs["genAs_toMu"], r)
 derived_objs["back_to_back_dsa_pairs"]   = lambda objs: (lambda pairs, v1, v2: pairs[np.cos(v1.deltaangle(v2)) <= -0.99])(get_pairs(objs["dsaMuons"]),*ak.unzip(get_pairs(objs["dsaMuons"])))
 derived_objs["parallel_dsa_pairs"]   = lambda objs: (lambda pairs, v1, v2: pairs[np.cos(v1.deltaangle(v2)) >= 0.99])(get_pairs(objs["dsaMuons"]),*ak.unzip(get_pairs(objs["dsaMuons"])))

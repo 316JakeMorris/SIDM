@@ -6,11 +6,12 @@
 ### Main selections ###
 
 no_cuts: &no_cuts
-  obj_cuts: &no_obj_cuts
+  obj_cuts: &minimal_obj_cuts
     electrons: &no_ele_cuts
       - "pT > 0 GeV"
     muons: &no_mu_cuts
       - "pT > 0 GeV"
+      - "looseID"
     photons: &no_photon_cuts
       - "pT > 0 GeV"
     dsaMuons: &no_dsaMuon_cuts
@@ -19,7 +20,7 @@ no_cuts: &no_cuts
 # Trigger only. Apparently the processor needs an obj_cuts so the "trigger" yaml entry won't work
 pass_trigger: &pass_trigger
   obj_cuts: &obj_pass_trigger
-    <<: *no_obj_cuts          # pT > 0 on electrons, muons, photons, dsaMuons
+    <<: *minimal_obj_cuts          # pT > 0 on electrons, muons, photons, dsaMuons
   evt_cuts: &evt_pass_trigger
     - "pass triggers"
 
