@@ -159,6 +159,7 @@ obj_cut_defs = {
         "pT < 300 GeV": lambda objs: objs["genAs_toE"].pt < 300,
     },
     "electrons": {
+        "pT > 0 GeV": lambda objs: objs["electrons"].pt > 0,
         "pT > 10 GeV": lambda objs: objs["electrons"].pt > 10,
         "pT > 30 GeV": lambda objs: objs["electrons"].pt > 30,
         "|eta| < 1.479": lambda objs: abs(objs["electrons"].eta) < 1.479,
@@ -205,6 +206,7 @@ obj_cut_defs = {
         "dR(bjets, mu) > 0.4": lambda objs: dR(objs["bjets"], objs["muons"]) > 0.4,
     },
     "muons": {
+        "pT > 0 GeV": lambda objs, muons: muons.pt > 0,
         #Tested the following to try to enable us to apply these cuts to muons *and* matched_muons associated to dsas
         "looseID": lambda objs, muons: muons.looseId,
         "tightID": lambda objs, muons: muons.tightId,
@@ -228,6 +230,7 @@ obj_cut_defs = {
                                             + muons.trkNumCSCHits) > 3,
     },
     "photons":{
+        "pT > 0 GeV": lambda objs: objs["photons"].pt > 0,
         "pT > 20 GeV": lambda objs: objs["photons"].pt > 20,
         "pT > 30 GeV": lambda objs: objs["photons"].pt > 30,
         "eta-phi_veto" : lambda objs: ~ ((objs["photons"].eta <= 1.4)
@@ -251,6 +254,7 @@ obj_cut_defs = {
         'Photon DR Veto 0p045': lambda objs: (dR(objs['photons'],objs['electrons']) > 0.045),
     },
     "dsaMuons": {
+        "pT > 0 GeV": lambda objs, dsa: dsa.pt > 0,
         "pT > 10 GeV": lambda objs, dsa: dsa.pt > 10,
         "pT > 100 GeV": lambda objs, dsa: dsa.pt > 100,
         "eta-phi_veto" : lambda objs, dsa: ~ ((dsa.eta <= 1.4)
